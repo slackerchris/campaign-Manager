@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.1.1] — 2026-04-07
+
+### Changed
+
+- **Whisper moved out of default image** — `openai-whisper` and PyTorch are no longer installed in the default Docker image, reducing image size from ~6 GB to ~350 MB. Run `./install.sh install-asr` to rebuild with local Whisper support when needed.
+- **`install.sh` new `install-asr` command** — rebuilds the image with `INSTALL_WHISPER=true`. Accepts `TORCH_EXTRA_INDEX` env var for GPU-capable torch builds.
+- **Dockerfile `INSTALL_WHISPER` build arg** — defaults to `false`. Pass `--build-arg INSTALL_WHISPER=true` to include Whisper in any custom build.
+
+---
+
 ## [0.1.0] — 2026-04-07
 
 ### Security

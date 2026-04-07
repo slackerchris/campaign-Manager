@@ -10,8 +10,11 @@ RUN npm run build
 
 FROM node:22-bookworm-slim AS runtime
 
-# TORCH_EXTRA_INDEX: override to install GPU-capable torch, e.g.:
-#   docker build --build-arg TORCH_EXTRA_INDEX=https://download.pytorch.org/whl/cu121 ...
+# Pass --build-arg INSTALL_WHISPER=true to include local Whisper ASR support.
+# Omit (default) for a lean ~350 MB image when using remote/cloud ASR.
+ARG INSTALL_WHISPER=false
+# Override to install GPU-capable torch, e.g.:
+#   --build-arg TORCH_EXTRA_INDEX=https://download.pytorch.org/whl/cu121
 ARG TORCH_EXTRA_INDEX=""
 
 RUN apt-get update \
@@ -24,9 +27,11 @@ RUN apt-get update \
     python3-venv \
   && rm -rf /var/lib/apt/lists/* \
   && python3 -m venv /opt/venv \
-  && /opt/venv/bin/pip install --no-cache-dir \
-       $([ -n "$TORCH_EXTRA_INDEX" ] && echo "--index-url $TORCH_EXTRA_INDEX torch" || true) \
-       openai-whisper
+  && if [ "$INSTALL_WHISPER" = "true" ]; then \
+       /opt/venv/bin/pip install --no-cache-dir \
+         $([ -n "$TORCH_EXTRA_INDEX" ] && echo "--index-url $TORCH_EXTRA_INDEX torch" || true) \
+         openai-whisper; \
+     fi
 
 ENV PATH="/opt/venv/bin:$PATH"
 
