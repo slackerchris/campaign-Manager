@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased] — 2026-04-07
+## [0.1.0] — 2026-04-07
 
 ### Security
 
@@ -40,11 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`.dockerignore` additions** — `scripts/`, `*.sqlite` added alongside existing exclusions to keep the build context lean and avoid sending local databases or Python scripts into the image.
 - **README updated** — added Security section, `.env.example` reference, corrected Docker/Python notes, expanded environment variable descriptions, and removed outdated notes about missing auth.
 
----
-
-## [Unreleased] — 2026-04-07 (UI)
-
-### Changed
+### UI Changes
 
 - **Flat top navigation** — replaced the Dashboard navlink + dropdown "Menu ▾" pattern with five explicit `NavLink` items (Dashboard, DM, Player, Lexicon, Settings) plus a "← Campaigns" link. Active tab is highlighted with an amber border/background. The old `globalMenuOpen` state is no longer needed.
 - **DM page tabbed layout** — the DM page was a single long scroll of ~10 unrelated panels. It is now split into four tabs:
