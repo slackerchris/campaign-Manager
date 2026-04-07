@@ -1,0 +1,33 @@
+services:
+  dnd-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dnd-dashboard:latest
+    ports:
+      - "8790:8790"
+    environment:
+      API_PORT: 8790
+      DATA_DIR: /app/data
+      DIARIZATION_MODE: auto   # auto | llm | pyannote  (auto uses pyannote if HF token is saved, else LLM guess)
+      # ASR_PROVIDER: remote    # remote | local | groq | openai  (default: remote)
+      LLM_PROVIDER: ollama
+      LLM_MODEL: qwen2.5:7b
+      # APP_TOKEN: your-secret-token   # Uncomment to require bearer token on all /api/* routes
+      # SSH settings for remote audio transcription
+      OLLAMA_SSH_KEY: /root/.ssh/openclaw_homelab
+      OLLAMA_SSH_USER: root
+      OLLAMA_SSH_HOST: 10.0.50.5
+    volumes:
+      - ./data:/app/data
+      - ~/.ssh/openclaw_homelab:/root/.ssh/openclaw_homelab:ro
+      - ~/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+    restart: unless-stopped
+    # GPU passthrough — uncomment on your Docker box (requires NVIDIA Container Toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
