@@ -41,7 +41,6 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 COPY server.mjs ./server.mjs
-COPY scripts ./scripts
 COPY public ./public
 
 RUN mkdir -p /app/data
