@@ -8,6 +8,5 @@ docs
 logs
 *.log
 *.sqlite
-scripts/
 docker-compose*.yml
 compose*.yml
