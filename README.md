@@ -11,7 +11,8 @@ The project combines a React frontend with an Express API. It handles campaign s
 - Import reference data from PDFs and `dnd-data`
 - Run a transcription pipeline for audio or transcript uploads
 - Keep pipeline output in an approval queue until the DM approves changes
-- Persist campaign state in SQLite while keeping filesystem artifacts focused on imports, snapshots, and exports
+- Complete multi-tenant roles across campaign participants (DM vs Player Workspaces)
+- Persist campaign state and authentication contexts entirely in SQLite.
 
 ## Architecture
 
@@ -20,21 +21,20 @@ The project combines a React frontend with an Express API. It handles campaign s
 - `data/campaigns/<campaign-id>/` — per-campaign `campaign.sqlite` plus filesystem artifact directories
 - `docs/PIPELINE_CHATGPT_MODE.md` — transcription pipeline behavior and configuration
 
-## UI Layout
-
-The app uses a campaign shell layout (`CampaignLayout`) with a flat top nav:
+The app uses a campaign shell layout (`CampaignLayout`) with a flat top nav that automatically adjusts visibility depending on the currently authenticated User Role:
 
 - **Dashboard** — stat cards, PC avatars, recent journal entries
+- **Admin Setup & Login Gateways** — `/setup` claims a fresh installation, and `/campaigns/:id/login` centralizes the passwordless Player Invite flow alongside the DM system unlock.
 - **DM** — DM-only workflows split across four tabs:
   - *Session* — session manager, transcription pipeline, module PDF import
   - *Review* — import highlights, approval queue, journal + transcript viewer
   - *Campaign* — PC list, DM notes, sneak-peek editor
   - *Tools* — data browser
-- **Player** — player-facing session view and sneak-peek display
+- **Player Workspaces** — personal player environments containing dedicated contextual views
 - **Lexicon** — searchable canon entries (NPCs, places, terms)
 - **Settings** — LLM config, ASR config, API key management
 
-A **← Campaigns** link in the nav returns to the campaign list.
+A **←** link in the nav returns to the multi-campaign selector.
 
 ## Local Development
 
@@ -95,8 +95,8 @@ Container notes:
 
 The app is SQLite-first for campaign state.
 
-- `campaign.sqlite` is the source of truth for canonical lexicon entities, aliases, tracker rows, journal entries, bard tales, and campaign metadata documents such as approvals, sessions, PCs, quotes, lexicon views, places, DM notes, sneak-peek items, and story journal entries.
-- Live application state is no longer mirrored into JSON snapshot files during normal operation.
+- `campaign.sqlite` is the source of truth for all metadata. It internally isolates Data Tables (`users`, `invites`, `sessions_auth`, `journal_entries`, `lexicon_entities`, `tracker_rows`) preventing cross-contamination across sessions.
+- Component row visibility is natively protected via `user_id` and `visibility` restrictions enforced by back-end middleware constraints.
 - `meta.json`, raw `sessions/` snapshots, and import artifacts under `imports/` still live on disk outside the SQLite database.
 
 Common campaign files include:
@@ -116,7 +116,8 @@ Common campaign files include:
 
 ## Security
 
-- **Auth**: set `APP_TOKEN` to require a bearer token on all `/api/*` routes. The comparison uses constant-time equality to prevent timing attacks.
+- **Initial Setup**: A fresh instance has an empty `APP_TOKEN`. Navigate your browser to `/setup` to assign the Master Configuration password. This locks the application.
+- **Dynamic Role-Gating Auth**: Player links use generated `/join/<token>` routes. `APP_TOKEN` simply serves as the emergency vault to bootstrap initial `DM` accounts via the `/campaigns/:id/login` gateway API. Bearer Session cookies are issued automatically and managed in `localStorage`.
 - **CORS**: set `CORS_ORIGINS` to a comma-separated list of allowed origins. Defaults to `localhost` only when unset.
 - **Body size**: JSON request bodies are capped at 10 MB and file uploads default to 200 MB (`MAX_UPLOAD_BYTES`).
 - **Job concurrency**: at most `MAX_CONCURRENT_JOBS` (default 3) transcription jobs run simultaneously; further requests receive HTTP 429.
