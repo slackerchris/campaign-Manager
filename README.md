@@ -17,7 +17,8 @@ The project combines a React frontend with an Express API. It handles campaign s
 ## Architecture
 
 - `src/` — React app
-- `server.mjs` — Express API, import pipeline, persistence, and migration helpers
+- `server.mjs` — Express API entry point
+- `server/` — Backend modules (routes, middleware, import pipeline, persistence, and migration helpers)
 - `data/campaigns/<campaign-id>/` — per-campaign `campaign.sqlite` plus filesystem artifact directories
 - `docs/PIPELINE_CHATGPT_MODE.md` — transcription pipeline behavior and configuration
 
