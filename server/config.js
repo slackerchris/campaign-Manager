@@ -13,6 +13,9 @@ export const SSH_USER = process.env.OLLAMA_SSH_USER || 'root'
 export const SSH_HOST = process.env.OLLAMA_SSH_HOST || '10.0.50.5'
 export const REMOTE_AUDIO_DIR = process.env.REMOTE_AUDIO_DIR || '/tmp/dnd-audio-in'
 export const REMOTE_OUT_DIR = process.env.REMOTE_OUT_DIR || '/tmp/dnd-audio-out'
+export const WHISPER_LOCAL_BASE = process.env.WHISPER_LOCAL_BASE || 'http://localhost:8000/v1'
+export const WHISPER_LOCAL_MODEL = process.env.WHISPER_LOCAL_MODEL || 'whisper-1'
+
 export const WHISPER_MODEL = process.env.WHISPER_MODEL || 'tiny'
 export const WHISPER_DEVICE = process.env.WHISPER_DEVICE || 'cuda'
 export const CHUNK_SECONDS = Number(process.env.WHISPER_CHUNK_SECONDS || 600)
@@ -90,13 +93,10 @@ export const GEMINI_KEY_FILE = path.join(SECRETS_DIR, 'gemini-api-key.json')
 export const PYANNOTE_TOKEN_FILE = path.join(SECRETS_DIR, 'pyannote-hf-token.json')
 export const GROQ_KEY_FILE = path.join(SECRETS_DIR, 'groq-api-key.json')
 export const ASR_CONFIG_FILE = path.join(SECRETS_DIR, 'asr-config.json')
-export const APP_TOKEN_FILE = path.join(SECRETS_DIR, 'app-token.json')
+export const ADMIN_AUTH_FILE = path.join(SECRETS_DIR, 'admin-auth.json')
 
 export const CAMPAIGN_DB_CACHE_MAX = envNumber(process.env.CAMPAIGN_DB_CACHE_MAX, 10, 1)
 
 export const CORS_ORIGINS = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
   : ['https://dnd.throne.middl.earth', 'https://dnd.middl.earth', 'http://localhost:5173', 'http://localhost:4173']
-
-export let APP_TOKEN = (process.env.APP_TOKEN || '').trim()
-export function setAppToken(val) { APP_TOKEN = val }

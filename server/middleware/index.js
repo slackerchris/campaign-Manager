@@ -1,6 +1,6 @@
 
 import cors from 'cors';
-import crypto from 'node:crypto';
+import process from 'node:process';
 
 const _corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)

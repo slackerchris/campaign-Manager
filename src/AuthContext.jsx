@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 
 const AuthContext = createContext(null)
 
@@ -22,45 +22,60 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (!activeCampaignId) {
-      setUser(null)
-      setSessionToken(null)
+      const token = localStorage.getItem('dnd_token')
+      if (token) {
+        setSessionToken(token)
+        setUser({
+          id: localStorage.getItem('dnd_token_user') || '',
+          role: localStorage.getItem('dnd_token_role') || 'unknown',
+          displayName: localStorage.getItem('dnd_token_display') || '',
+          token,
+        })
+      } else {
+        setUser(null)
+        setSessionToken(null)
+      }
       setIsLoading(false)
       return
     }
 
-    const token = localStorage.getItem(`dnd_session_${activeCampaignId}`)
+    const campaignToken = localStorage.getItem(`dnd_session_${activeCampaignId}`)
+    const adminToken = localStorage.getItem('dnd_token')
+    const token = campaignToken || adminToken
     if (token) {
+      const role = campaignToken
+        ? localStorage.getItem(`dnd_session_role_${activeCampaignId}`) || 'unknown'
+        : localStorage.getItem('dnd_token_role') || 'admin'
+      const userId = campaignToken
+        ? localStorage.getItem(`dnd_session_user_${activeCampaignId}`) || ''
+        : localStorage.getItem('dnd_token_user') || 'server-admin'
       setSessionToken(token)
-      // Because we use JWTs/Opaque tokens and map them via middleware, we can decode 
-      // the role easily or make an authenticated health check
-      // For now, assume if token exists, we do a quick validation
-      validateSession(token, activeCampaignId)
+      setUser({ id: userId, role, token })
+      setIsLoading(false)
     } else {
       setUser(null)
       setSessionToken(null)
       setIsLoading(false)
     }
-  }, [activeCampaignId])
-
-  async function validateSession(token, campaignId) {
-    try {
-      // In a real app we'd have a /me or /health that requires auth
-      // For now, if we hit any campaign endpoint and it 401s, we know the token is bad
-      setUser({ role: 'unknown', token }) // Temporary pessimistic state
-      setIsLoading(false)
-    } catch {
-      logout(campaignId)
-    }
-  }
+  }, [activeCampaignId, location.pathname])
 
   function login(campaignId, session) {
     localStorage.setItem(`dnd_session_${campaignId}`, session.token)
+    localStorage.setItem(`dnd_session_role_${campaignId}`, session.role || 'unknown')
+    localStorage.setItem(`dnd_session_user_${campaignId}`, session.userId || '')
     setSessionToken(session.token)
     setUser({ id: session.userId, role: session.role })
   }
 
   function logout(campaignId) {
     localStorage.removeItem(`dnd_session_${campaignId}`)
+    localStorage.removeItem(`dnd_session_role_${campaignId}`)
+    localStorage.removeItem(`dnd_session_user_${campaignId}`)
+    if (user?.role === 'admin') {
+      localStorage.removeItem('dnd_token')
+      localStorage.removeItem('dnd_token_role')
+      localStorage.removeItem('dnd_token_user')
+    }
     setSessionToken(null)
     setUser(null)
   }

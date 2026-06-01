@@ -51,22 +51,23 @@ export default function LexiconPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Search + filter header */}
-      <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5 space-y-3">
+      <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <h2 className="text-xl font-semibold">Lexicon</h2>
-            <p className="text-sm text-slate-400">Glossary and cross-reference for world terms, NPCs, places, quests, and lore.</p>
+            <div className="text-[11px] font-semibold uppercase text-amber-400/80">Canon</div>
+            <h2 className="text-base font-semibold">Campaign Canon</h2>
+            <p className="text-sm text-slate-400">NPCs, places, quests, terms, and lore that have become part of the record.</p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowAddLexicon(true)} className="rounded-xl border border-slate-700 px-3 py-1 text-sm">Add</button>
+            <button onClick={() => setShowAddLexicon(true)} className="rounded-md border border-slate-700 px-3 py-1.5 text-sm">Add</button>
             {!resetConfirm
-              ? <button onClick={() => { setResetConfirm(true); setResetStatus('') }} className="rounded-xl border border-rose-800 text-rose-400 px-3 py-1 text-sm">Reset</button>
+              ? <button onClick={() => { setResetConfirm(true); setResetStatus('') }} className="rounded-md border border-rose-800 text-rose-400 px-3 py-1.5 text-sm">Reset</button>
               : <span className="flex items-center gap-2">
                   <span className="text-xs text-rose-400">Clear all {unifiedLexiconEntries.length} entries?</span>
-                  <button onClick={resetLexicon} className="rounded-xl border border-rose-600 bg-rose-900/40 text-rose-300 px-3 py-1 text-sm font-medium">Yes, clear</button>
-                  <button onClick={() => setResetConfirm(false)} className="rounded-xl border border-slate-700 px-3 py-1 text-sm">Cancel</button>
+                  <button onClick={resetLexicon} className="rounded-md border border-rose-600 bg-rose-900/40 text-rose-300 px-3 py-1.5 text-sm font-medium">Yes, clear</button>
+                  <button onClick={() => setResetConfirm(false)} className="rounded-md border border-slate-700 px-3 py-1.5 text-sm">Cancel</button>
                 </span>
             }
           </div>
@@ -76,12 +77,12 @@ export default function LexiconPage() {
             value={lexiconSearch}
             onChange={(e) => setLexiconSearch(e.target.value)}
             placeholder="Search terms or notes..."
-            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm md:col-span-2"
+            className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-sm md:col-span-2"
           />
           <select
             value={lexiconKindFilter}
             onChange={(e) => setLexiconKindFilter(e.target.value)}
-            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+            className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
           >
             <option value="all">All kinds</option>
             {lexiconKinds.map((k) => <option key={k} value={k}>{k}</option>)}
@@ -92,15 +93,16 @@ export default function LexiconPage() {
       </div>
 
       {/* Entries */}
-      <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5">
-        <div className="space-y-2">
+      <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-4">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
           {filteredLexicon.map((l) => (
             <button
               key={l.id}
               onClick={() => openLexiconDetail(l)}
-              className="w-full text-left rounded-xl border border-slate-700 bg-slate-950/60 p-3 text-sm hover:border-amber-700 transition-colors"
+              className="min-h-24 w-full text-left rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-sm hover:border-amber-700 transition-colors"
             >
-              <div className="font-medium">{l.term} {l.kind ? `(${l.kind})` : ''}</div>
+              <div className="font-medium text-slate-100">{l.term}</div>
+              {l.kind && <div className="mt-1 text-[11px] uppercase text-amber-400/70">{l.kind}</div>}
               {l.notes && <div className="text-xs text-slate-400 mt-0.5 truncate">{l.notes}</div>}
             </button>
           ))}

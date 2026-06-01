@@ -1994,6 +1994,4 @@ export async function processTranscriptJob(job) {
   }
 }
 
-// /api/health is intentionally placed AFTER the auth middleware above, so it is
-// protected by APP_TOKEN when that is set. It also exposes infra details, so
-// keep it out of completely open access.
+// /api/health exposes infra details, so keep it behind the app's auth layer.

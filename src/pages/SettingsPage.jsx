@@ -22,6 +22,8 @@ export default function SettingsPage() {
   const [groqKeyStatus, setGroqKeyStatus] = useState('')
   const [groqHasKey, setGroqHasKey] = useState(false)
   const [asrInfo, setAsrInfo] = useState(null)
+  const [whisperLocalBase, setWhisperLocalBase] = useState('http://localhost:8000/v1')
+  const [whisperLocalModel, setWhisperLocalModel] = useState('whisper-1')
 
   // ── LLM state ─────────────────────────────────────────────────────────────
   const [llmStatus, setLlmStatus] = useState('')
@@ -57,6 +59,8 @@ export default function SettingsPage() {
         setAsrProvider(j.asrProvider || 'remote')
         setGroqHasKey(!!j.hasGroqKey)
         setAsrInfo(j)
+        if (j.whisperLocalBase) setWhisperLocalBase(j.whisperLocalBase)
+        if (j.whisperLocalModel) setWhisperLocalModel(j.whisperLocalModel)
       }
     } catch { /* ignore */ }
   }
@@ -66,12 +70,25 @@ export default function SettingsPage() {
     const r = await apiFetch(`${API_BASE}/asr/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ asrProvider: provider }),
+      body: JSON.stringify({ asrProvider: provider, whisperLocalBase, whisperLocalModel }),
     })
     const j = await r.json()
     if (!r.ok || !j.ok) { setAsrStatus(`Failed: ${j.error || 'unknown error'}`); return }
     setAsrProvider(j.asrProvider)
     setAsrStatus(`ASR provider set to: ${j.asrProvider}`)
+  }
+
+  async function saveWhisperLocalConfig() {
+    setAsrStatus('Saving...')
+    const r = await apiFetch(`${API_BASE}/asr/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asrProvider: 'whisper-local', whisperLocalBase, whisperLocalModel }),
+    })
+    const j = await r.json()
+    if (!r.ok || !j.ok) { setAsrStatus(`Failed: ${j.error || 'unknown error'}`); return }
+    setAsrProvider(j.asrProvider)
+    setAsrStatus('Whisper local config saved')
   }
 
   async function saveGroqKey() {
@@ -244,13 +261,15 @@ export default function SettingsPage() {
             className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
           >
             <option value="remote">Remote — SSH + Whisper GPU</option>
-            <option value="local">Local — Whisper CPU/GPU in container</option>
+            <option value="local">Local — Whisper CLI in container</option>
+            <option value="whisper-local">Local API — faster-whisper-server / whisper.cpp</option>
             <option value="groq">Groq Cloud — free fast API</option>
             <option value="openai">OpenAI Cloud — whisper-1</option>
           </select>
           <div className="text-xs text-slate-400">
             {asrProvider === 'remote' && 'Transcription runs on the remote GPU host via SSH.'}
             {asrProvider === 'local' && 'Runs openai-whisper locally inside the container (CPU/GPU).'}
+            {asrProvider === 'whisper-local' && 'Calls a local OpenAI-compatible Whisper API (faster-whisper-server, whisper.cpp, etc.).'}
             {asrProvider === 'groq' && 'Uses Groq\'s free whisper-large-v3 API. Requires a Groq key below.'}
             {asrProvider === 'openai' && 'Uses OpenAI whisper-1 endpoint. Requires an OpenAI key.'}
           </div>
@@ -264,6 +283,29 @@ export default function SettingsPage() {
           )}
         </div>
         {asrStatus && <div className="mt-2 text-xs text-amber-300">{asrStatus}</div>}
+        {asrProvider === 'whisper-local' && (
+          <div className="mt-3 space-y-2 border-t border-slate-800 pt-3">
+            <div className="text-xs text-slate-500">Local API endpoint and model name. Compatible with faster-whisper-server, whisper.cpp server, or any OpenAI-compatible transcription API.</div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-center">
+              <input
+                value={whisperLocalBase}
+                onChange={(e) => setWhisperLocalBase(e.target.value)}
+                placeholder="http://localhost:8000/v1"
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
+              />
+              <input
+                value={whisperLocalModel}
+                onChange={(e) => setWhisperLocalModel(e.target.value)}
+                placeholder="whisper-1"
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
+              />
+              <button onClick={saveWhisperLocalConfig} className="rounded-xl border border-amber-700 text-amber-300 px-4 py-2 text-sm">Save</button>
+            </div>
+            <div className="text-xs text-slate-600">
+              faster-whisper-server: <span className="text-slate-500 font-mono">docker run -p 8000:8000 fedirz/faster-whisper-server</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Groq API Key */}

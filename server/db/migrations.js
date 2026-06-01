@@ -146,4 +146,12 @@ export function ensureSqlSchema(db) {
 
   try { db.exec("ALTER TABLE tracker_rows ADD COLUMN user_id TEXT") } catch {}
   try { db.exec("ALTER TABLE tracker_rows ADD COLUMN visibility TEXT NOT NULL DEFAULT 'campaign'") } catch {}
+
+  // Player multi-campaign: link campaign user to server account
+  try { db.exec("ALTER TABLE users ADD COLUMN server_user_id TEXT") } catch {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_users_server_user_id ON users(server_user_id)") } catch {}
+
+  // Directed invites: DM can invite a specific server account
+  try { db.exec("ALTER TABLE invites ADD COLUMN target_server_user_id TEXT") } catch {}
+  try { db.exec("ALTER TABLE invites ADD COLUMN dm_display_name TEXT") } catch {}
 }

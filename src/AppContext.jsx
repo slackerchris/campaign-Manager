@@ -72,11 +72,11 @@ export function AppProvider({ children }) {
   })
 
   const [detailModal, setDetailModal] = useState(null)
-  const [detailDraft, setDetailDraft] = useState({ term: '', kind: '', role: '', relation: '', aliases: '', notes: '', inTracker: false })
+  const [detailDraft, setDetailDraft] = useState({ term: '', kind: '', creatureType: '', role: '', relation: '', aliases: '', notes: '', inTracker: false })
   const [detailStatus, setDetailStatus] = useState('')
 
   const [showAddLexicon, setShowAddLexicon] = useState(false)
-  const [newLex, setNewLex] = useState({ term: '', kind: '', role: '', relation: '', aliases: '', notes: '', inTracker: false })
+  const [newLex, setNewLex] = useState({ term: '', kind: '', creatureType: '', role: '', relation: '', aliases: '', notes: '', inTracker: false })
 
   const [showAddPlace, setShowAddPlace] = useState(false)
   const [newPlace, setNewPlace] = useState({ name: '', type: '', notes: '', tags: '' })
@@ -338,14 +338,14 @@ export function AppProvider({ children }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        term: newLex.term, kind: newLex.kind, role: newLex.role, relation: newLex.relation,
+        term: newLex.term, kind: newLex.kind, creatureType: newLex.creatureType, role: newLex.role, relation: newLex.relation,
         aliases: newLex.aliases.split(',').map((x) => x.trim()).filter(Boolean),
         notes: newLex.notes, inTracker: !!newLex.inTracker,
       }),
     })
     const j = await r.json()
     if (j.ok) {
-      setNewLex({ term: '', kind: '', role: '', relation: '', aliases: '', notes: '', inTracker: false })
+      setNewLex({ term: '', kind: '', creatureType: '', role: '', relation: '', aliases: '', notes: '', inTracker: false })
       setShowAddLexicon(false)
       await loadCampaignState(activeCampaign.id)
     }
@@ -354,7 +354,7 @@ export function AppProvider({ children }) {
   function openLexiconDetail(item) {
     setDetailModal({ type: 'lexicon', title: item?.term || 'Lexicon Term', item })
     setDetailDraft({
-      term: String(item?.term || ''), kind: String(item?.kind || ''),
+      term: String(item?.term || ''), kind: String(item?.kind || ''), creatureType: String(item?.creatureType || ''),
       role: String(item?.role || ''), relation: String(item?.relation || ''),
       aliases: Array.isArray(item?.aliases) ? item.aliases.join(', ') : '',
       notes: String(item?.notes || ''), inTracker: isLexiconItemInTracker(item),
@@ -369,7 +369,7 @@ export function AppProvider({ children }) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        term: detailDraft.term, kind: detailDraft.kind, role: detailDraft.role, relation: detailDraft.relation,
+        term: detailDraft.term, kind: detailDraft.kind, creatureType: detailDraft.creatureType, role: detailDraft.role, relation: detailDraft.relation,
         aliases: detailDraft.aliases.split(',').map((x) => x.trim()).filter(Boolean),
         notes: detailDraft.notes, inTracker: !!detailDraft.inTracker,
       }),

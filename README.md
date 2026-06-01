@@ -117,8 +117,9 @@ Common campaign files include:
 
 ## Security
 
-- **Initial Setup**: A fresh instance has an empty `APP_TOKEN`. Navigate your browser to `/setup` to assign the Master Configuration password. This locks the application.
-- **Dynamic Role-Gating Auth**: Player links use generated `/join/<token>` routes. `APP_TOKEN` simply serves as the emergency vault to bootstrap initial `DM` accounts via the `/campaigns/:id/login` gateway API. Bearer Session cookies are issued automatically and managed in `localStorage`.
+- **Initial Setup**: A fresh instance redirects to `/setup` so you can create the first server admin account.
+- **Admin Recovery**: If you forget the admin password, reset it from the server terminal with `npm run admin:reset`.
+- **Dynamic Role-Gating Auth**: Admins sign in with username/password. Players join campaigns with generated invite codes. Session tokens are issued automatically and managed in `localStorage`.
 - **CORS**: set `CORS_ORIGINS` to a comma-separated list of allowed origins. Defaults to `localhost` only when unset.
 - **Body size**: JSON request bodies are capped at 10 MB and file uploads default to 200 MB (`MAX_UPLOAD_BYTES`).
 - **Job concurrency**: at most `MAX_CONCURRENT_JOBS` (default 3) transcription jobs run simultaneously; further requests receive HTTP 429.
@@ -129,7 +130,6 @@ See [`.env.example`](.env.example) for the full list with descriptions. Key vari
 
 - `API_PORT` — listening port (default `8790`)
 - `DATA_DIR` — path to campaign data directory (default `./data`)
-- `APP_TOKEN` — bearer token for API authentication (unset = no auth)
 - `CORS_ORIGINS` — comma-separated allowed origins (unset = localhost only)
 - `MAX_UPLOAD_BYTES` — max file upload size in bytes (default 200 MB)
 - `JOB_RETENTION_MS` — how long completed jobs are kept in memory

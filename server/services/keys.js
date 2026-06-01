@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs';
 import {
-  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, PYANNOTE_HF_TOKEN, GROQ_API_KEY, ASR_PROVIDER, APP_TOKEN,
-  OPENAI_KEY_FILE, setOpenaiApiKey, setAnthropicApiKey, setGeminiApiKey, setGroqApiKey, setPyannoteHfToken, setAsrProvider, setAppToken, ANTHROPIC_KEY_FILE, GEMINI_KEY_FILE, PYANNOTE_TOKEN_FILE, GROQ_KEY_FILE,
-  ASR_CONFIG_FILE, APP_TOKEN_FILE, SECRETS_DIR
+  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, PYANNOTE_HF_TOKEN, GROQ_API_KEY, ASR_PROVIDER,
+  OPENAI_KEY_FILE, setOpenaiApiKey, setAnthropicApiKey, setGeminiApiKey, setGroqApiKey, setPyannoteHfToken, setAsrProvider, ANTHROPIC_KEY_FILE, GEMINI_KEY_FILE, PYANNOTE_TOKEN_FILE, GROQ_KEY_FILE,
+  ASR_CONFIG_FILE, SECRETS_DIR
 } from '../config.js';
 import { readJson, writeJson } from '../utils.js';
 export async function loadPersistedOpenAiKey() {
@@ -112,21 +112,4 @@ export async function loadPersistedAsrConfig() {
 export async function persistAsrConfig() {
   await fs.mkdir(SECRETS_DIR, { recursive: true })
   await writeJson(ASR_CONFIG_FILE, { asrProvider: ASR_PROVIDER, updatedAt: Date.now() })
-}
-
-export async function loadPersistedAppToken() {
-  if (APP_TOKEN) return APP_TOKEN
-  try {
-    const saved = await readJson(APP_TOKEN_FILE, { appToken: '' })
-    const tok = String(saved?.appToken || '').trim()
-    if (tok) { setAppToken(tok); return tok }
-  } catch { /* ignore */ }
-  return ''
-}
-
-export async function persistAppToken(token) {
-  if (APP_TOKEN) throw new Error('App token is already set permanently')
-  await fs.mkdir(SECRETS_DIR, { recursive: true })
-  await writeJson(APP_TOKEN_FILE, { appToken: String(token || '').trim(), updatedAt: Date.now() })
-  setAppToken(token)
 }

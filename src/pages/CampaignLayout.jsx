@@ -15,12 +15,14 @@ export default function CampaignLayout() {
   const {
     activeCampaign, isMobileView, error, setError,
     initCampaign,
+    setShowAddPc, setShowAddLexicon,
     reviewApproval, editingNpc, editingPc,
     showAddPc, showAddLexicon, showAddPlace, detailModal,
   } = useApp()
 
   const { user, isLoading, logout } = useAuth()
   const location = useLocation()
+  const canManageCampaign = ['dm', 'admin'].includes(user?.role)
 
   useEffect(() => {
     initCampaign(id)
@@ -47,9 +49,23 @@ export default function CampaignLayout() {
     )
   }
 
+  const navItems = [
+    { to: `/campaigns/${id}`, label: 'Desk', end: true },
+    ...(canManageCampaign ? [
+      { to: `/campaigns/${id}/dm`, label: 'Prep' },
+      { to: `/campaigns/${id}/player`, label: 'Party' },
+    ] : [
+      { to: `/campaigns/${id}/me`, label: 'My Character' },
+    ]),
+    { to: `/campaigns/${id}/lexicon`, label: 'Canon' },
+    ...(canManageCampaign ? [
+      { to: `/campaigns/${id}/settings`, label: 'Settings' },
+    ] : []),
+  ]
+
   return (
     <div
-      className={`relative min-h-screen text-slate-100 ${isMobileView ? 'p-3' : 'p-6'}`}
+      className={`relative min-h-screen text-slate-100 ${isMobileView ? 'p-3' : 'p-5'}`}
       style={{
         backgroundImage: 'url(/campaign-manager-bg.png)',
         backgroundSize: 'cover',
@@ -57,65 +73,74 @@ export default function CampaignLayout() {
         backgroundAttachment: 'scroll',
       }}
     >
-      <div className="absolute inset-0 bg-slate-950/80 pointer-events-none" aria-hidden="true" />
-      <div className={`relative z-10 ${isMobileView ? 'max-w-none' : 'max-w-7xl'} mx-auto space-y-6`}>
+      <div className="absolute inset-0 bg-slate-950/88 pointer-events-none" aria-hidden="true" />
+      <div className={`relative z-10 ${isMobileView ? 'max-w-none' : 'max-w-[1500px]'} mx-auto space-y-4`}>
 
-        {/* Header */}
-        <div className={`rounded-3xl border border-slate-800 bg-slate-900 ${isMobileView ? 'p-4' : 'p-6'}`}>
-          <div className={`flex ${isMobileView ? 'flex-col items-start' : 'justify-between items-center'} gap-4`}>
-            <div>
-              <h1 className="text-3xl font-bold">{activeCampaign.name}</h1>
-              <p className="text-xs text-slate-400">
-                {activeCampaign.id} • <span className="text-amber-500 font-semibold uppercase">{user.role}</span>
-              </p>
+        <header className="rounded-lg border border-slate-800/90 bg-slate-950/90 shadow-2xl shadow-black/20">
+          <div className={`flex ${isMobileView ? 'flex-col items-stretch' : 'items-center justify-between'} gap-4 border-b border-slate-800 px-4 py-3`}>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-2xl font-semibold text-slate-50">{activeCampaign.name}</h1>
+                <span className="rounded border border-amber-700/70 bg-amber-950/40 px-2 py-0.5 text-[11px] font-semibold uppercase text-amber-300">
+                  {user.role}
+                </span>
+              </div>
+              <div className="mt-1 truncate text-xs text-slate-500">{activeCampaign.id}</div>
             </div>
-            <div className={`${isMobileView ? 'grid grid-cols-3 w-full' : 'flex'} gap-2 items-center`}>
-              {[
-                { to: `/campaigns/${id}`, label: 'Dashboard', end: true },
-                ...(user.role === 'dm' ? [
-                  { to: `/campaigns/${id}/dm`, label: 'DM View' },
-                  { to: `/campaigns/${id}/player`, label: 'Cast View' }
-                ] : [
-                  { to: `/campaigns/${id}/me`, label: 'My Workspace' }
-                ]),
-                { to: `/campaigns/${id}/lexicon`, label: 'Lexicon' },
-                ...(user.role === 'dm' ? [
-                  { to: `/campaigns/${id}/settings`, label: 'Settings' }
-                ] : []),
-              ].map(({ to, label, end }) => (
+            <div className={`flex ${isMobileView ? 'w-full flex-col' : 'items-center'} gap-2`}>
+              {canManageCampaign && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowAddPc(true)}
+                    className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:border-emerald-600 hover:text-emerald-300"
+                  >
+                    Add PC
+                  </button>
+                  <button
+                    onClick={() => setShowAddLexicon(true)}
+                    className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:border-amber-600 hover:text-amber-300"
+                  >
+                    Add Canon
+                  </button>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Link
+                  to="/"
+                  className="rounded-md border border-slate-800 px-3 py-2 text-sm text-slate-500 hover:text-slate-300 hover:border-slate-600"
+                  title="Switch Campaign"
+                >
+                  Switch
+                </Link>
+                <button
+                  onClick={() => logout(id)}
+                  className="rounded-md border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-900/40"
+                  title="Log Out"
+                >
+                  Log out
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <nav className={`${isMobileView ? 'grid grid-cols-2' : 'flex'} gap-1 px-3 py-2`}>
+            {navItems.map(({ to, label, end }) => (
                 <NavLink
                   key={to}
                   to={to}
                   end={end}
                   className={({ isActive }) =>
-                    `rounded-xl border px-4 py-2 text-sm text-center ${isActive ? 'border-amber-500 text-amber-300 bg-amber-950/20' : 'border-slate-700 hover:border-slate-500 transition-colors'}`
+                    `rounded-md px-3 py-2 text-sm text-center transition-colors ${isActive ? 'bg-slate-800 text-amber-300' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100'}`
                   }
                 >
                   {label}
                 </NavLink>
               ))}
-              <div className="flex gap-2">
-                <Link
-                  to="/"
-                  className="rounded-xl border border-slate-800 px-3 py-2 text-sm text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors text-center"
-                  title="Switch Campaign"
-                >
-                  ←
-                </Link>
-                <button
-                  onClick={() => logout(id)}
-                  className="rounded-xl border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-900/50 hover:border-rose-700 transition-colors text-center"
-                  title="Log Out"
-                >
-                  ⏏
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+          </nav>
+        </header>
 
         {error && (
-          <div className="rounded-xl border border-rose-700 bg-rose-950/20 px-4 py-3 text-rose-300 text-sm flex items-center justify-between gap-2">
+          <div className="rounded-lg border border-rose-700 bg-rose-950/30 px-4 py-3 text-rose-300 text-sm flex items-center justify-between gap-2">
             <span>{error}</span>
             <button onClick={() => setError('')} className="rounded border border-rose-700 px-2 py-0.5 text-xs">×</button>
           </div>

@@ -7,6 +7,7 @@
     "dev": "vite",
     "api": "DATA_DIR=./data DIARIZATION_MODE=pyannote node server.mjs",
     "start": "node server.mjs",
+    "admin:reset": "node scripts/reset-admin-password.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

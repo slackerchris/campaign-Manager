@@ -42,6 +42,7 @@ export default function DmPage() {
   const [selectedFile, setSelectedFile] = useState(null)
   const [sourceLabel, setSourceLabel] = useState('')
   const [job, setJob] = useState({ status: 'idle', stage: '', progressPct: 0, etaSec: null, doneChunks: 0, totalChunks: 0 })
+  const [pipelineError, setPipelineError] = useState('')
   const [lastTranscript, setLastTranscript] = useState('')
   const [speakerMap, setSpeakerMap] = useState({})
 
@@ -61,6 +62,12 @@ export default function DmPage() {
   // ── Data Browser state ────────────────────────────────────────────────────
   const [dataBrowserSource, setDataBrowserSource] = useState('dnd-data')
   const [dataBrowserCampaignId, setDataBrowserCampaignId] = useState(() => activeCampaign?.id || '')
+
+  // ── invite player state ───────────────────────────────────────────────────
+  const [serverUsers, setServerUsers] = useState([])
+  const [userSearch, setUserSearch] = useState('')
+  const [inviteStatus, setInviteStatus] = useState('')
+  const [inviteError, setInviteError] = useState('')
   const [dataBrowserBook, setDataBrowserBook] = useState('Curse of Strahd')
   const [dataBrowserMode, setDataBrowserMode] = useState('approval')
   const [dataBrowserSets, setDataBrowserSets] = useState({ npcs: true, monsters: true, spells: true, items: true, classes: true, species: true, backgrounds: true, places: true, lore: true })
@@ -95,6 +102,7 @@ export default function DmPage() {
     }
 
     setError('')
+    setPipelineError('')
     setLastTranscript('')
     setJob({ status: 'uploading', stage: 'uploading', progressPct: 0, etaSec: null, doneChunks: 0, totalChunks: 0 })
 
@@ -108,13 +116,20 @@ export default function DmPage() {
 
     const start = await apiFetch(`${API_BASE}${endpoint}`, { method: 'POST', body: form })
     const sj = await start.json()
-    if (!start.ok || !sj.ok) return setError(sj.error || 'Start failed')
+    if (!start.ok || !sj.ok) { setPipelineError(sj.error || 'Failed to start pipeline'); setJob({ status: 'idle' }); return }
 
     while (true) {
       await new Promise((r) => setTimeout(r, 3000))
       const pr = await apiFetch(`${API_BASE}/transcribe/${sj.jobId}`)
       const pj = await pr.json()
-      if (!pr.ok || !pj.ok) return setError(pj.error || 'Job poll failed')
+      if (!pr.ok || !pj.ok) {
+        const msg = pr.status === 404
+          ? 'Job not found — the server may have restarted. Re-run the pipeline to continue.'
+          : pj.error || 'Pipeline poll failed'
+        setPipelineError(msg)
+        setJob({ status: 'idle' })
+        return
+      }
 
       setJob(pj)
 
@@ -122,8 +137,37 @@ export default function DmPage() {
         setLastTranscript(pj.diarizedTranscript || pj.transcript || '')
         break
       }
-      if (pj.status === 'cancelled') { setError('Pipeline cancelled'); break }
-      if (pj.status === 'error') { setError(pj.error || 'Pipeline failed'); break }
+      if (pj.status === 'cancelled') { setPipelineError('Pipeline cancelled'); setJob({ status: 'idle' }); break }
+      if (pj.status === 'error') { setPipelineError(pj.error || 'Pipeline failed'); setJob({ status: 'idle' }); break }
+    }
+  }
+
+  async function loadServerUsers() {
+    if (serverUsers.length) return
+    try {
+      const r = await apiFetch(`${API_BASE}/server/users`)
+      const j = await r.json()
+      if (j.ok) setServerUsers(j.users)
+    } catch { /* ignore */ }
+  }
+
+  async function sendDirectInvite(targetUser) {
+    if (!activeCampaign) return
+    setInviteStatus('Sending...')
+    setInviteError('')
+    try {
+      const r = await apiFetch(`${API_BASE}/campaigns/${activeCampaign.id}/auth/direct-invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetServerUserId: targetUser.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Invite failed')
+      setInviteStatus(`Invite sent to ${targetUser.displayName}`)
+      setUserSearch('')
+    } catch (err) {
+      setInviteError(err.message)
+      setInviteStatus('')
     }
   }
 
@@ -266,12 +310,19 @@ export default function DmPage() {
               {['running', 'queued', 'uploading'].includes(String(job.status || '')) && job.id && (
                 <button onClick={cancelPipeline} className="w-full rounded-xl border border-rose-700 text-rose-300 px-4 py-2">Cancel</button>
               )}
-              <div className="text-xs text-slate-300 space-y-1">
-                <div>Status: {job.status || 'idle'}</div>
-                <div>Stage: {job.stage || '—'}</div>
-                <div>Progress: {job.progressPct || 0}% {job.totalChunks ? `(${job.doneChunks}/${job.totalChunks})` : ''}</div>
-                <div>ETA: {fmtEta(job.etaSec)}</div>
-              </div>
+              {pipelineError && (
+                <div className="rounded-xl border border-rose-800 bg-rose-950/40 p-3 text-xs text-rose-300">
+                  {pipelineError}
+                </div>
+              )}
+              {job.status !== 'idle' && (
+                <div className="text-xs text-slate-300 space-y-1">
+                  <div>Status: {job.status}</div>
+                  <div>Stage: {job.stage || '—'}</div>
+                  <div>Progress: {job.progressPct || 0}% {job.totalChunks ? `(${job.doneChunks}/${job.totalChunks})` : ''}</div>
+                  <div>ETA: {fmtEta(job.etaSec)}</div>
+                </div>
+              )}
             </div>
 
             {/* Campaign Module PDF */}
@@ -442,6 +493,49 @@ export default function DmPage() {
                 </div>
               ))}
               {(state.pcs || []).length === 0 && <div className="text-sm text-slate-400">No PCs yet.</div>}
+            </div>
+          </div>
+
+          {/* Invite Player */}
+          <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5" onClick={loadServerUsers}>
+            <h2 className="text-xl font-semibold">Invite Player</h2>
+            <p className="mt-1 text-xs text-slate-500">Invite an existing account to this campaign. They'll see it on their player home.</p>
+            <input
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              placeholder="Search by name or username..."
+              className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+            />
+            {inviteError && <div className="mt-2 text-xs text-rose-400">{inviteError}</div>}
+            {inviteStatus && <div className="mt-2 text-xs text-emerald-400">{inviteStatus}</div>}
+            <div className="mt-2 space-y-1">
+              {serverUsers
+                .filter((u) => {
+                  if (!userSearch.trim()) return false
+                  const q = userSearch.toLowerCase()
+                  return u.username.includes(q) || u.displayName.toLowerCase().includes(q)
+                })
+                .slice(0, 6)
+                .map((u) => (
+                  <div key={u.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+                    <div>
+                      <div className="text-sm text-slate-100">{u.displayName}</div>
+                      <div className="text-xs text-slate-500">@{u.username}</div>
+                    </div>
+                    <button
+                      onClick={() => sendDirectInvite(u)}
+                      className="rounded-lg border border-amber-700 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
+                    >
+                      Invite
+                    </button>
+                  </div>
+                ))}
+              {userSearch.trim() && serverUsers.filter((u) => {
+                const q = userSearch.toLowerCase()
+                return u.username.includes(q) || u.displayName.toLowerCase().includes(q)
+              }).length === 0 && (
+                <div className="text-xs text-slate-500 mt-2">No users match.</div>
+              )}
             </div>
           </div>
 

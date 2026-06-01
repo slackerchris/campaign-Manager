@@ -1,9 +1,6 @@
 import express from 'express';
 import { corsMiddleware, authMiddleware } from './server/middleware/index.js';
 import { setupRoutes } from './server/routes/index.js';
-import { loadPersistedAppToken } from './server/services/keys.js';
-
-await loadPersistedAppToken();
 
 const app = express();
 app.use(corsMiddleware);

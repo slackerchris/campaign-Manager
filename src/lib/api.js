@@ -1,15 +1,15 @@
 const TOKEN_KEY = 'dnd_token'
 
 export function getStoredToken() {
-  try { return localStorage.getItem(TOKEN_KEY) || '' } catch { return '' }
+  try { return localStorage.getItem(TOKEN_KEY) || '' } catch { return '' /* ignore unavailable storage */ }
 }
 
 export function setStoredToken(token) {
-  try { localStorage.setItem(TOKEN_KEY, token) } catch {}
+  try { localStorage.setItem(TOKEN_KEY, token) } catch { /* ignore unavailable storage */ }
 }
 
 export function clearStoredToken() {
-  try { localStorage.removeItem(TOKEN_KEY) } catch {}
+  try { localStorage.removeItem(TOKEN_KEY) } catch { /* ignore unavailable storage */ }
 }
 
 /**
@@ -18,7 +18,7 @@ export function clearStoredToken() {
  * Now intelligently pulls campaign-specific session tokens for multi-tenant isolation.
  */
 export function apiFetch(url, opts = {}) {
-  let token = getStoredToken() // Fallback to global DM bootstrap token
+  let token = getStoredToken()
   
   // Attempt to sniff campaignId from the fetch URL
   // e.g. /api/campaigns/my-campaign/endpoints

@@ -21,9 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Security
 
 - **CORS locked down** — the API now rejects requests from unlisted origins. Allowed origins are configured via the `CORS_ORIGINS` env var (comma-separated). Defaults to `localhost` variants only when unset. Previously all origins were accepted.
-- **Timing-safe auth** — `APP_TOKEN` bearer comparison replaced with `crypto.timingSafeEqual` to prevent timing-based token oracle attacks.
+- **Timing-safe auth** — legacy bearer comparison replaced with `crypto.timingSafeEqual` to prevent timing-based token oracle attacks.
 - **Body size cap** — `express.json` now enforces a 10 MB limit, preventing memory exhaustion from oversized JSON payloads.
-- **`/api/health` behind auth** — the health endpoint is now protected by the same `APP_TOKEN` middleware as all other `/api/*` routes. It previously exposed internal build and version info without authentication.
+- **`/api/health` behind auth** — the health endpoint is now protected by the same API middleware as all other `/api/*` routes. It previously exposed internal build and version info without authentication.
 
 ### Fixed
 

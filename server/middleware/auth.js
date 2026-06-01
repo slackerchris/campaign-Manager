@@ -1,11 +1,15 @@
-import crypto from 'node:crypto'
 import { dbForCampaignBase } from '../db/index.js'
 import { resolveCampaignBase } from '../utils.js'
-import { APP_TOKEN } from '../config.js'
+import { validateAdminSession } from '../services/adminAuth.js'
 
-export const authMiddleware = (req, res, next) => {
+export const authMiddleware = async (req, res, next) => {
   const authHeader = String(req.headers['authorization'] || '')
+  const isPublicCampaignAuthRoute =
+    req.method === 'POST' &&
+    /\/campaigns\/[^/?]+\/auth\/join(?:[/?]|$)/.test(req.originalUrl)
+
   if (!authHeader.startsWith('Bearer ')) {
+    if (isPublicCampaignAuthRoute) return next()
     // If no token is provided but they're hitting a campaign endpoint, reject
     if (req.originalUrl.includes('/campaigns/')) {
        return res.status(401).json({ ok: false, error: 'Unauthorized: Missing token' })
@@ -14,18 +18,11 @@ export const authMiddleware = (req, res, next) => {
   }
 
   const token = authHeader.slice(7).trim()
-  
-  // Phase 2: "The old APP_TOKEN becomes a 'DM bootstrap token' used only to create the first DM account or recover access."
-  // If the APP_TOKEN matches, we bypass as super-admin (used for /bootstrap)
-  if (APP_TOKEN) {
-    const appTokenBuf = Buffer.from(APP_TOKEN)
-    const tokenBuf = Buffer.from(token)
-    try {
-      if (tokenBuf.length === appTokenBuf.length && crypto.timingSafeEqual(tokenBuf, appTokenBuf)) {
-        req.user = { role: 'dm', id: 'bootstrap-superadmin', bootstrap: true }
-        return next()
-      }
-    } catch { /* ignore and parse as user session token */ }
+
+  const adminSession = await validateAdminSession(token)
+  if (adminSession) {
+    req.user = adminSession
+    return next()
   }
 
   // Attempt to extract campaignId from the URL (e.g. /api/campaigns/:id)

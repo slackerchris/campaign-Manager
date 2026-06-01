@@ -1,5 +1,13 @@
 import { useApp } from '../../AppContext.jsx'
 
+const CREATURE_TYPES = [
+  'Aberration', 'Beast', 'Celestial', 'Construct', 'Dragon',
+  'Elemental', 'Fey', 'Fiend', 'Giant', 'Humanoid',
+  'Monstrosity', 'Ooze', 'Plant', 'Undead',
+]
+
+const isCreature = (kind) => kind === 'npc' || kind === 'monster'
+
 export default function LexiconDetailModal() {
   const {
     detailModal, setDetailModal,
@@ -22,7 +30,22 @@ export default function LexiconDetailModal() {
           {detailModal.type === 'lexicon' && (
             <>
               <input value={detailDraft.term} onChange={(e) => setDetailDraft((p) => ({ ...p, term: e.target.value }))} placeholder="Term" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />
-              <input value={detailDraft.kind} onChange={(e) => setDetailDraft((p) => ({ ...p, kind: e.target.value }))} placeholder="Kind" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />
+              <select value={detailDraft.kind} onChange={(e) => setDetailDraft((p) => ({ ...p, kind: e.target.value, creatureType: '' }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+                <option value="">Kind</option>
+                <option value="npc">NPC</option>
+                <option value="monster">Monster</option>
+                <option value="place">Place</option>
+                <option value="quest">Quest</option>
+                <option value="item">Item</option>
+                <option value="faction">Faction</option>
+                <option value="term">Term</option>
+              </select>
+              {isCreature(detailDraft.kind) && (
+                <select value={detailDraft.creatureType} onChange={(e) => setDetailDraft((p) => ({ ...p, creatureType: e.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+                  <option value="">Creature type (optional)</option>
+                  {CREATURE_TYPES.map((t) => <option key={t} value={t.toLowerCase()}>{t}</option>)}
+                </select>
+              )}
               <input value={detailDraft.role} onChange={(e) => setDetailDraft((p) => ({ ...p, role: e.target.value }))} placeholder="Role" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />
               <input value={detailDraft.relation} onChange={(e) => setDetailDraft((p) => ({ ...p, relation: e.target.value }))} placeholder="Relation (optional)" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />
               <input value={detailDraft.aliases} onChange={(e) => setDetailDraft((p) => ({ ...p, aliases: e.target.value }))} placeholder="Aliases (comma-separated)" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />

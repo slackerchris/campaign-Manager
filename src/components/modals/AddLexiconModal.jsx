@@ -1,5 +1,13 @@
 import { useApp } from '../../AppContext.jsx'
 
+const CREATURE_TYPES = [
+  'Aberration', 'Beast', 'Celestial', 'Construct', 'Dragon',
+  'Elemental', 'Fey', 'Fiend', 'Giant', 'Humanoid',
+  'Monstrosity', 'Ooze', 'Plant', 'Undead',
+]
+
+const isCreature = (kind) => kind === 'npc' || kind === 'monster'
+
 export default function AddLexiconModal() {
   const { showAddLexicon, setShowAddLexicon, newLex, setNewLex, addLexicon, trackerTypeForKind } = useApp()
   if (!showAddLexicon) return null
@@ -8,7 +16,22 @@ export default function AddLexiconModal() {
       <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-5 space-y-3">
         <h3 className="text-xl font-semibold">Add Canon Term</h3>
         <input value={newLex.term} onChange={(e) => setNewLex({ ...newLex, term: e.target.value })} placeholder="Canon term" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />
-        <input value={newLex.kind} onChange={(e) => setNewLex({ ...newLex, kind: e.target.value })} placeholder="Kind (npc/place/item/etc)" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />
+        <select value={newLex.kind} onChange={(e) => setNewLex({ ...newLex, kind: e.target.value, creatureType: '' })} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+          <option value="">Kind</option>
+          <option value="npc">NPC</option>
+          <option value="monster">Monster</option>
+          <option value="place">Place</option>
+          <option value="quest">Quest</option>
+          <option value="item">Item</option>
+          <option value="faction">Faction</option>
+          <option value="term">Term</option>
+        </select>
+        {isCreature(newLex.kind) && (
+          <select value={newLex.creatureType} onChange={(e) => setNewLex({ ...newLex, creatureType: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+            <option value="">Creature type (optional)</option>
+            {CREATURE_TYPES.map((t) => <option key={t} value={t.toLowerCase()}>{t}</option>)}
+          </select>
+        )}
         <input value={newLex.role} onChange={(e) => setNewLex({ ...newLex, role: e.target.value })} placeholder="Role" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />
         <input value={newLex.relation} onChange={(e) => setNewLex({ ...newLex, relation: e.target.value })} placeholder="Relation (optional)" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />
         <input value={newLex.aliases} onChange={(e) => setNewLex({ ...newLex, aliases: e.target.value })} placeholder="Aliases (comma-separated)" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" />

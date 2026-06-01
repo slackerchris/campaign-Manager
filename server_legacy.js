@@ -28,8 +28,12 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL || 'tiny'
 const WHISPER_DEVICE = process.env.WHISPER_DEVICE || 'cuda'
 const CHUNK_SECONDS = Number(process.env.WHISPER_CHUNK_SECONDS || 600)
 
-// ASR provider: remote (SSH+whisper) | local (whisper CLI) | groq | openai
+// ASR provider: remote (SSH+whisper) | local (whisper CLI) | groq | openai | whisper-local
 let ASR_PROVIDER = String(process.env.ASR_PROVIDER || 'remote').toLowerCase()
+
+// Local Whisper API (faster-whisper-server, whisper.cpp server, etc.)
+let WHISPER_LOCAL_BASE = process.env.WHISPER_LOCAL_BASE || 'http://localhost:8000/v1'
+let WHISPER_LOCAL_MODEL = process.env.WHISPER_LOCAL_MODEL || 'whisper-1'
 
 // Groq settings (used when ASR_PROVIDER=groq)
 const GROQ_BASE = process.env.GROQ_BASE || 'https://api.groq.com/openai/v1'
@@ -183,29 +187,6 @@ const upload = multer({
     fileSize: MAX_UPLOAD_BYTES,
   },
 })
-
-// Optional bearer-token auth. Set APP_TOKEN env var to enable.
-const APP_TOKEN = (process.env.APP_TOKEN || '').trim()
-if (APP_TOKEN) {
-  const _appTokenBuf = Buffer.from(APP_TOKEN)
-  app.use('/api', (req, res, next) => {
-    const authHeader = String(req.headers['authorization'] || '')
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
-    let valid = false
-    if (token) {
-      try {
-        const tokenBuf = Buffer.from(token)
-        // Constant-time comparison to prevent timing attacks.
-        valid = tokenBuf.length === _appTokenBuf.length &&
-          crypto.timingSafeEqual(tokenBuf, _appTokenBuf)
-      } catch { valid = false }
-    }
-    if (!valid) {
-      return res.status(401).json({ ok: false, error: 'Unauthorized' })
-    }
-    next()
-  })
-}
 
 async function run(cmd, args) {
   return execFileAsync(cmd, args, { maxBuffer: 1024 * 1024 * 80 })
@@ -713,6 +694,7 @@ const CAMPAIGN_DOCUMENT_DEFS = {
   places: { fileKey: 'places', defaultValue: [] },
   dmNotes: { fileKey: 'dmNotes', defaultValue: { text: '' } },
   dmSneakPeek: { fileKey: 'dmSneakPeek', defaultValue: [] },
+  lexiconMeta: { fileKey: 'lexiconMeta', defaultValue: {} },
 }
 
 function cloneCampaignDocumentDefault(docKey) {
@@ -1130,7 +1112,7 @@ function normalizeLexTerm(value = '') {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-function upsertLexiconEntry(lexMap, { term = '', kind = '', role = '', relation = '', aliases = [], notes = '' } = {}) {
+function upsertLexiconEntry(lexMap, { term = '', kind = '', creatureType = '', role = '', relation = '', aliases = [], notes = '' } = {}) {
   const normalized = normalizeLexTerm(term)
   if (!normalized) return null
 
@@ -1141,6 +1123,7 @@ function upsertLexiconEntry(lexMap, { term = '', kind = '', role = '', relation 
     id: existing.id || crypto.randomUUID(),
     term: String(existing.term || term).trim(),
     kind: String(kind || existing.kind || '').trim(),
+    creatureType: String(creatureType || existing.creatureType || '').trim(),
     role: String(role || existing.role || '').trim(),
     relation: String(relation || existing.relation || '').trim(),
     aliases: Array.from(aliasSet),
@@ -1155,7 +1138,7 @@ function upsertLexiconEntry(lexMap, { term = '', kind = '', role = '', relation 
 function normalizeEntityType(value = '') {
   const raw = String(value || '').trim().toLowerCase()
   if (!raw) return 'term'
-  if (['npc', 'quest', 'place', 'event', 'item', 'faction', 'term'].includes(raw)) return raw
+  if (['npc', 'monster', 'quest', 'place', 'event', 'item', 'faction', 'term'].includes(raw)) return raw
   if (['city', 'town', 'region', 'dungeon', 'landmark', 'location'].includes(raw)) return 'place'
   return 'term'
 }
@@ -2011,6 +1994,26 @@ async function transcribeViaOpenAi(filePath) {
   if (!r.ok) {
     const body = await r.text().catch(() => '')
     throw new Error(`OpenAI ASR HTTP ${r.status}${body ? `: ${body.slice(0, 240)}` : ''}`)
+  }
+  const j = await r.json()
+  return { text: String(j?.text || '').trim(), segments: Array.isArray(j?.segments) ? j.segments : [] }
+}
+
+async function transcribeViaWhisperLocal(filePath) {
+  const fileData = await fs.readFile(filePath)
+  const formData = new FormData()
+  formData.append('file', new Blob([fileData]), path.basename(filePath))
+  formData.append('model', WHISPER_LOCAL_MODEL)
+  formData.append('language', 'en')
+  formData.append('response_format', 'verbose_json')
+  const r = await fetch(`${WHISPER_LOCAL_BASE}/audio/transcriptions`, {
+    method: 'POST',
+    body: formData,
+    signal: AbortSignal.timeout(300000),
+  })
+  if (!r.ok) {
+    const body = await r.text().catch(() => '')
+    throw new Error(`Whisper local API HTTP ${r.status}${body ? `: ${body.slice(0, 240)}` : ''}`)
   }
   const j = await r.json()
   return { text: String(j?.text || '').trim(), segments: Array.isArray(j?.segments) ? j.segments : [] }
@@ -2958,8 +2961,12 @@ async function processAudioJob(jobId) {
       }
 
     } else {
-      // groq or openai — API-based chunked upload
-      const providerLabel = asrProvider === 'groq' ? `Groq (${GROQ_WHISPER_MODEL})` : 'OpenAI (whisper-1)'
+      // groq, openai, or whisper-local — API-based chunked upload
+      const providerLabel = asrProvider === 'groq'
+        ? `Groq (${GROQ_WHISPER_MODEL})`
+        : asrProvider === 'whisper-local'
+          ? `Whisper Local (${WHISPER_LOCAL_MODEL})`
+          : 'OpenAI (whisper-1)'
       const checkCancelled = () => assertNotCancelled(job)
       const transcribeFn = asrProvider === 'groq'
         ? (fp) => transcribeViaGroq(fp, {
@@ -2969,7 +2976,9 @@ async function processAudioJob(jobId) {
             },
             checkCancelled,
           })
-        : transcribeViaOpenAi
+        : asrProvider === 'whisper-local'
+          ? transcribeViaWhisperLocal
+          : transcribeViaOpenAi
       job.stage = `transcribing via ${providerLabel}`
       job.updatedAt = Date.now()
 
@@ -3122,9 +3131,8 @@ async function processTranscriptJob(job) {
   }
 }
 
-// /api/health is intentionally placed AFTER the auth middleware above, so it is
-// protected by APP_TOKEN when that is set. It also exposes infra details, so
-// keep it out of completely open access.
+// /api/health is intentionally mounted behind the shared API middleware.
+// Keep it out of completely open access because it exposes infra details.
 export function setupLegacyRoutes(app) {
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -3355,35 +3363,48 @@ app.get('/api/asr/config', (_req, res) => {
   res.json({
     ok: true,
     asrProvider: ASR_PROVIDER,
-    providers: ['remote', 'local', 'groq', 'openai'],
+    providers: ['remote', 'local', 'groq', 'openai', 'whisper-local'],
     hasGroqKey: !!GROQ_API_KEY,
     hasOpenaiKey: !!OPENAI_API_KEY,
     whisperModel: WHISPER_MODEL,
     whisperDevice: WHISPER_DEVICE,
     groqModel: GROQ_WHISPER_MODEL,
     remoteHost: `${SSH_USER}@${SSH_HOST}`,
+    whisperLocalBase: WHISPER_LOCAL_BASE,
+    whisperLocalModel: WHISPER_LOCAL_MODEL,
   })
 })
 
 app.put('/api/asr/config', async (req, res) => {
   const provider = String(req.body?.asrProvider || '').trim().toLowerCase()
-  if (!['remote', 'local', 'groq', 'openai'].includes(provider)) {
-    return res.status(400).json({ ok: false, error: 'asrProvider must be remote|local|groq|openai' })
+  if (!['remote', 'local', 'groq', 'openai', 'whisper-local'].includes(provider)) {
+    return res.status(400).json({ ok: false, error: 'asrProvider must be remote|local|groq|openai|whisper-local' })
   }
   if (provider === 'groq' && !GROQ_API_KEY) return res.status(400).json({ ok: false, error: 'Groq API key not set — save it first' })
   if (provider === 'openai' && !OPENAI_API_KEY) return res.status(400).json({ ok: false, error: 'OpenAI API key not set — save it first' })
+  if (req.body?.whisperLocalBase) WHISPER_LOCAL_BASE = String(req.body.whisperLocalBase).trim()
+  if (req.body?.whisperLocalModel) WHISPER_LOCAL_MODEL = String(req.body.whisperLocalModel).trim()
   ASR_PROVIDER = provider
   await persistAsrConfig()
-  res.json({ ok: true, asrProvider: ASR_PROVIDER })
+  res.json({ ok: true, asrProvider: ASR_PROVIDER, whisperLocalBase: WHISPER_LOCAL_BASE, whisperLocalModel: WHISPER_LOCAL_MODEL })
 })
 
-app.get('/api/campaigns', async (_req, res) => res.json({ ok: true, campaigns: await listCampaigns() }))
+app.get('/api/campaigns', async (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, error: 'Sign in required' })
+  const campaigns = await listCampaigns()
+  if (req.user.role === 'admin') return res.json({ ok: true, campaigns })
+  if (req.user.role === 'dm') {
+    return res.json({ ok: true, campaigns: campaigns.filter((c) => String(c.ownerUserId || '') === String(req.user.id || '')) })
+  }
+  res.json({ ok: true, campaigns: [] })
+})
 
 app.post('/api/campaigns', withStaticWriteLock('campaigns-root', async (req, res) => {
+  if (req.user?.role !== 'dm') return res.status(403).json({ ok: false, error: 'Only DMs can create campaigns' })
   const name = String(req.body?.name || '').trim()
   if (!name) return res.status(400).json({ ok: false, error: 'Campaign name required' })
   const id = `${slugify(name) || 'campaign'}-${crypto.randomUUID().slice(0, 6)}`
-  const meta = { id, name, createdAt: Date.now() }
+  const meta = { id, name, ownerUserId: req.user.id, ownerDisplayName: req.user.displayName || 'DM', createdAt: Date.now() }
   const { base } = await ensureCampaignDirs(id, { create: true })
   await writeJson(path.join(base, 'meta.json'), meta)
   const db = dbForCampaignBase(base)
@@ -3934,6 +3955,7 @@ app.post('/api/campaigns/:id/lexicon', withCampaignParamWriteLock(async (req, re
 
   const term = String(req.body?.term || '').trim()
   const kind = String(req.body?.kind || '').trim()
+  const creatureType = String(req.body?.creatureType || '').trim()
   const role = String(req.body?.role || '').trim()
   const relation = String(req.body?.relation || '').trim()
   const aliases = Array.isArray(req.body?.aliases) ? req.body.aliases.map((x) => String(x).trim()).filter(Boolean) : []
@@ -3942,7 +3964,7 @@ app.post('/api/campaigns/:id/lexicon', withCampaignParamWriteLock(async (req, re
   if (!term) return res.status(400).json({ ok: false, error: 'term required' })
 
   const lexMap = new Map((lexicon || []).map((l) => [normalizeLexTerm(l.term || ''), l]))
-  const merged = upsertLexiconEntry(lexMap, { term, kind, role, relation, aliases, notes })
+  const merged = upsertLexiconEntry(lexMap, { term, kind, creatureType, role, relation, aliases, notes })
 
   await persistCampaignDocument(req.params.id, base, 'lexicon', Array.from(lexMap.values()))
 
@@ -4032,6 +4054,7 @@ app.put('/api/campaigns/:id/lexicon/:termId', withCampaignParamWriteLock(async (
     id: entityId,
     term: String(req.body?.term ?? prev.term ?? '').trim(),
     kind: String(req.body?.kind ?? prev.kind ?? '').trim(),
+    creatureType: String(req.body?.creatureType ?? prev.creatureType ?? '').trim(),
     role: String(req.body?.role ?? prev.role ?? '').trim(),
     relation: String(req.body?.relation ?? prev.relation ?? '').trim(),
     aliases: Array.isArray(req.body?.aliases)
