@@ -13,8 +13,11 @@ export const SSH_USER = process.env.OLLAMA_SSH_USER || 'root'
 export const SSH_HOST = process.env.OLLAMA_SSH_HOST || '10.0.50.5'
 export const REMOTE_AUDIO_DIR = process.env.REMOTE_AUDIO_DIR || '/tmp/dnd-audio-in'
 export const REMOTE_OUT_DIR = process.env.REMOTE_OUT_DIR || '/tmp/dnd-audio-out'
-export const WHISPER_LOCAL_BASE = process.env.WHISPER_LOCAL_BASE || 'http://localhost:8000/v1'
-export const WHISPER_LOCAL_MODEL = process.env.WHISPER_LOCAL_MODEL || 'whisper-1'
+export const WHISPER_LOCAL_BASE = process.env.WHISPER_LOCAL_BASE || 'http://ollama.middl.earth.arda:8765'
+export const WHISPER_LOCAL_PATH = process.env.WHISPER_LOCAL_PATH || '/transcribe'
+export const WHISPER_LOCAL_MODEL = process.env.WHISPER_LOCAL_MODEL || 'large-v3'
+export const WHISPER_LOCAL_API_KEY = process.env.WHISPER_LOCAL_API_KEY || ''
+export const WHISPER_LOCAL_API_KEY_HEADER = process.env.WHISPER_LOCAL_API_KEY_HEADER || 'X-API-Key'
 
 export const WHISPER_MODEL = process.env.WHISPER_MODEL || 'tiny'
 export const WHISPER_DEVICE = process.env.WHISPER_DEVICE || 'cuda'
@@ -42,7 +45,7 @@ export const DIARIZATION_PYANNOTE_DEVICE = String(process.env.DIARIZATION_PYANNO
 export let PYANNOTE_HF_TOKEN = String(process.env.PYANNOTE_HF_TOKEN || process.env.HUGGINGFACE_TOKEN || '')
 export function setPyannoteHfToken(val) { PYANNOTE_HF_TOKEN = val }
 
-export const OLLAMA_BASE = process.env.OLLAMA_BASE || 'http://ollama.throne.middl.earth:11434'
+export const OLLAMA_BASE = process.env.OLLAMA_BASE || 'http://ollama.middl.earth.arda:11434'
 export const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com/v1'
 export const ANTHROPIC_BASE = process.env.ANTHROPIC_BASE || 'https://api.anthropic.com/v1'
 export const GEMINI_BASE = process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta'

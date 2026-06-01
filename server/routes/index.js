@@ -266,6 +266,16 @@ export function setupRoutes(app) {
     }
   });
 
+  app.get('/api/campaigns/:id/meta', async (req, res) => {
+    if (!req.user) return res.status(401).json({ ok: false, error: 'Sign in required' });
+    try {
+      const metaRaw = await fs.readFile(path.join(CAMPAIGNS_DIR, req.params.id, 'meta.json'), 'utf8');
+      res.json({ ok: true, campaign: JSON.parse(metaRaw) });
+    } catch {
+      res.status(404).json({ ok: false, error: 'Campaign not found' });
+    }
+  });
+
   app.get('/api/campaigns/:id/summary', async (req, res) => {
     if (!req.user) return res.status(401).json({ ok: false, error: 'Sign in required' });
     try {

@@ -20,6 +20,7 @@ export default function DmPage() {
     importDndbCharacter, linkPcToDdb, syncPcFromDdb,
     importModulePdf,
     createGameSession, deleteSelectedSession,
+    loadCampaignState,
     setError,
   } = useApp()
 
@@ -63,18 +64,20 @@ export default function DmPage() {
   const [dataBrowserSource, setDataBrowserSource] = useState('dnd-data')
   const [dataBrowserCampaignId, setDataBrowserCampaignId] = useState(() => activeCampaign?.id || '')
 
-  // ── invite player state ───────────────────────────────────────────────────
-  const [serverUsers, setServerUsers] = useState([])
-  const [userSearch, setUserSearch] = useState('')
-  const [inviteStatus, setInviteStatus] = useState('')
-  const [inviteError, setInviteError] = useState('')
   const [dataBrowserBook, setDataBrowserBook] = useState('Curse of Strahd')
   const [dataBrowserMode, setDataBrowserMode] = useState('approval')
   const [dataBrowserSets, setDataBrowserSets] = useState({ npcs: true, monsters: true, spells: true, items: true, classes: true, species: true, backgrounds: true, places: true, lore: true })
   const [dataBrowserStatus, setDataBrowserStatus] = useState('Ready.')
 
   // ── derived ───────────────────────────────────────────────────────────────
-  const latestApproval = (state.approvals || [])[0] || null
+  const sortedApprovals = (state.approvals || []).slice().sort((a, b) => {
+    const statusRank = (proposal) => String(proposal?.status || 'pending') === 'pending' ? 0 : 1
+    const rankDiff = statusRank(a) - statusRank(b)
+    if (rankDiff) return rankDiff
+    return Number(b?.createdAt || 0) - Number(a?.createdAt || 0)
+  })
+  const pendingApprovalCount = sortedApprovals.filter((a) => String(a?.status || 'pending') === 'pending').length
+  const latestApproval = sortedApprovals[0] || null
   const latestImportStats = latestApproval && latestApproval.sourceType === 'data-browser'
     ? {
         npcs: (latestApproval.npcUpdates || []).length,
@@ -135,39 +138,12 @@ export default function DmPage() {
 
       if (pj.status === 'done') {
         setLastTranscript(pj.diarizedTranscript || pj.transcript || '')
+        await loadCampaignState(activeCampaign.id)
+        setDmTab('review')
         break
       }
       if (pj.status === 'cancelled') { setPipelineError('Pipeline cancelled'); setJob({ status: 'idle' }); break }
       if (pj.status === 'error') { setPipelineError(pj.error || 'Pipeline failed'); setJob({ status: 'idle' }); break }
-    }
-  }
-
-  async function loadServerUsers() {
-    if (serverUsers.length) return
-    try {
-      const r = await apiFetch(`${API_BASE}/server/users`)
-      const j = await r.json()
-      if (j.ok) setServerUsers(j.users)
-    } catch { /* ignore */ }
-  }
-
-  async function sendDirectInvite(targetUser) {
-    if (!activeCampaign) return
-    setInviteStatus('Sending...')
-    setInviteError('')
-    try {
-      const r = await apiFetch(`${API_BASE}/campaigns/${activeCampaign.id}/auth/direct-invite`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetServerUserId: targetUser.id }),
-      })
-      const j = await r.json()
-      if (!r.ok || !j.ok) throw new Error(j.error || 'Invite failed')
-      setInviteStatus(`Invite sent to ${targetUser.displayName}`)
-      setUserSearch('')
-    } catch (err) {
-      setInviteError(err.message)
-      setInviteStatus('')
     }
   }
 
@@ -207,12 +183,12 @@ export default function DmPage() {
           </button>
         ))}
         {/* Pending approval count badge on Review tab */}
-        {dmTab !== 'review' && (state.approvals || []).filter((a) => a.status === 'pending').length > 0 && (
+        {dmTab !== 'review' && pendingApprovalCount > 0 && (
           <button
             onClick={() => setDmTab('review')}
             className="ml-auto rounded-full bg-rose-600 text-white text-xs px-2 py-0.5 font-semibold"
           >
-            {(state.approvals || []).filter((a) => a.status === 'pending').length} pending
+            {pendingApprovalCount} pending
           </button>
         )}
       </div>
@@ -355,7 +331,7 @@ export default function DmPage() {
             <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
                 <div className="text-slate-400 text-xs">Pending approvals</div>
-                <div className="text-lg font-semibold">{(state.approvals || []).filter((a) => a.status === 'pending').length}</div>
+                <div className="text-lg font-semibold">{pendingApprovalCount}</div>
               </div>
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
                 <div className="text-slate-400 text-xs">Canon NPCs</div>
@@ -386,7 +362,7 @@ export default function DmPage() {
           <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="text-xl font-semibold">Approval Queue</h2>
             <div className="mt-3 space-y-2 max-h-96 overflow-auto">
-              {(state.approvals || []).map((a) => (
+              {sortedApprovals.map((a) => (
                 <div key={a.id} className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
                   <div className="text-sm font-medium">{a.gameSessionTitle} • {a.sourceLabel}</div>
                   <div className="text-xs text-slate-400">{a.status} • {a.sourceType || 'source'} • {a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}</div>
@@ -398,7 +374,7 @@ export default function DmPage() {
                   </div>
                 </div>
               ))}
-              {(!state.approvals || state.approvals.length === 0) && <div className="text-sm text-slate-400">No pending approvals.</div>}
+              {sortedApprovals.length === 0 && <div className="text-sm text-slate-400">No approvals yet.</div>}
             </div>
           </div>
 
@@ -493,49 +469,6 @@ export default function DmPage() {
                 </div>
               ))}
               {(state.pcs || []).length === 0 && <div className="text-sm text-slate-400">No PCs yet.</div>}
-            </div>
-          </div>
-
-          {/* Invite Player */}
-          <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5" onClick={loadServerUsers}>
-            <h2 className="text-xl font-semibold">Invite Player</h2>
-            <p className="mt-1 text-xs text-slate-500">Invite an existing account to this campaign. They'll see it on their player home.</p>
-            <input
-              value={userSearch}
-              onChange={(e) => setUserSearch(e.target.value)}
-              placeholder="Search by name or username..."
-              className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
-            />
-            {inviteError && <div className="mt-2 text-xs text-rose-400">{inviteError}</div>}
-            {inviteStatus && <div className="mt-2 text-xs text-emerald-400">{inviteStatus}</div>}
-            <div className="mt-2 space-y-1">
-              {serverUsers
-                .filter((u) => {
-                  if (!userSearch.trim()) return false
-                  const q = userSearch.toLowerCase()
-                  return u.username.includes(q) || u.displayName.toLowerCase().includes(q)
-                })
-                .slice(0, 6)
-                .map((u) => (
-                  <div key={u.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
-                    <div>
-                      <div className="text-sm text-slate-100">{u.displayName}</div>
-                      <div className="text-xs text-slate-500">@{u.username}</div>
-                    </div>
-                    <button
-                      onClick={() => sendDirectInvite(u)}
-                      className="rounded-lg border border-amber-700 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
-                    >
-                      Invite
-                    </button>
-                  </div>
-                ))}
-              {userSearch.trim() && serverUsers.filter((u) => {
-                const q = userSearch.toLowerCase()
-                return u.username.includes(q) || u.displayName.toLowerCase().includes(q)
-              }).length === 0 && (
-                <div className="text-xs text-slate-500 mt-2">No users match.</div>
-              )}
             </div>
           </div>
 

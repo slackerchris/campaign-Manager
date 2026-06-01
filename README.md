@@ -12,6 +12,7 @@ A self-hosted web app for running D&D campaigns. Handles session transcripts, ca
 - **Lexicon** — searchable canon entries: NPCs, monsters, places, quests, items, factions, and terms. NPCs and monsters carry a D&D creature type (humanoid, undead, dragon, etc.)
 - **Player workspaces** — each player has their own view of the campaign with visibility controls
 - **Multi-user auth** — admin, DM, and player roles with server-level accounts and per-campaign sessions
+- **Server diagnostics** — admin-only health checks, retained job history, and recent request/error logs
 
 ---
 
@@ -22,6 +23,8 @@ A self-hosted web app for running D&D campaigns. Handles session transcripts, ca
 | **Admin** | Server console — manages users, invites DMs, configures API keys and ASR/LLM settings, handles campaign backups |
 | **DM** | Campaign desk — creates campaigns, imports sessions, manages canon, invites players |
 | **Player** | Player home — sees their campaigns, accepts DM invites, accesses their workspace |
+
+The admin is the server owner, not the person running the games. Admins invite or promote DMs, configure shared infrastructure, recover accounts, and handle backups. DMs create and run campaigns.
 
 ---
 
@@ -68,6 +71,67 @@ On first visit the app redirects to `/setup` where you create the admin account.
 3. DM creates their account, logs in, and creates a campaign
 4. DM invites players from the Campaign tab (search by username)
 5. Players sign up at `/login`, see the invite on their player home, and accept
+
+---
+
+## Admin Console
+
+The Admin Console is the server-owner workspace. It is intentionally separate from the DM campaign desk.
+
+### Users
+
+- Search users by username or display name
+- Filter by role
+- Promote or demote DMs and players
+- Reset a user's password
+- Revoke a user's sessions
+- Delete non-admin accounts
+
+### Invites
+
+- Create one-time DM or player account invite links
+- Copy invite links for users to create their own accounts
+- Revoke unused invites
+- Show active or historical invites
+
+### Campaigns
+
+Admins do not create campaigns for DMs. They can inspect and operate on existing campaign records:
+
+- Run SQLite storage checks
+- Download a full campaign JSON export
+- Write an export file on the server
+- Create a SQLite backup
+- Delete a campaign if needed
+
+### Diagnostics
+
+The Diagnostics tab is the first place to look when a pipeline run fails or something feels stuck.
+
+It shows:
+
+- Node process uptime, memory, and platform
+- Campaign and job counts
+- Current LLM, ASR, diarization, and job-limit settings
+- Data directory writability
+- Ollama reachability
+- Whisper-local reachability
+- Recent retained pipeline jobs
+- Recent API request logs and captured `console.warn` / `console.error` messages
+
+Diagnostics are process-local. Restarting the API clears the in-memory request log, but retained terminal jobs are reloaded from `data/jobs.sqlite`.
+
+### Settings
+
+Admin Settings control shared server infrastructure:
+
+- LLM provider and model
+- ASR provider
+- Whisper-local endpoint, path, model, API key header, and API key
+- OpenAI, Anthropic, Gemini, Groq, and Pyannote keys
+- Pipeline health check
+
+DM Settings may expose some of the same tools while working inside a campaign, but the admin version is the server-wide source of truth.
 
 ---
 
@@ -124,21 +188,36 @@ Upload a session audio file or plain text transcript. The pipeline:
 |----------|-------|
 | `remote` | SSH to a GPU host running Whisper (default) |
 | `local` | Whisper CLI inside the container |
-| `whisper-local` | Any OpenAI-compatible local API (faster-whisper-server, whisper.cpp, etc.) |
+| `whisper-local` | Local Whisper HTTP API. Supports OpenAI-compatible APIs or a simple `/transcribe` wrapper with an API key header. |
 | `groq` | Groq Cloud — free, fast. Requires `GROQ_API_KEY` |
 | `openai` | OpenAI whisper-1. Requires `OPENAI_API_KEY` |
 
-**Quickest local setup** for `whisper-local`:
+**Example local setup** for `whisper-local` with an existing Whisper wrapper:
 
 ```bash
-docker run -p 8000:8000 fedirz/faster-whisper-server
+ASR_PROVIDER=whisper-local
+WHISPER_LOCAL_BASE=http://ollama.middl.earth.arda:8765
+WHISPER_LOCAL_PATH=/transcribe
+WHISPER_LOCAL_MODEL=large-v3
+WHISPER_LOCAL_API_KEY=your-key-here
+WHISPER_LOCAL_API_KEY_HEADER=X-API-Key
 ```
 
-Then set `ASR_PROVIDER=whisper-local` in Settings.
+The app posts audio with form field `file` and expects `{ text, segments }` back.
 
 ### LLM Providers
 
 Ollama, OpenAI, Anthropic, and Google Gemini are all supported. Switch between them in the Admin Console or campaign Settings without restarting.
+
+For local/self-hosted use, Ollama is the default. The current example config points at:
+
+```bash
+OLLAMA_BASE=http://ollama.middl.earth.arda:11434
+LLM_PROVIDER=ollama
+LLM_MODEL=qwen2.5:7b
+```
+
+Chat subscriptions such as ChatGPT Plus/Pro or Claude Pro/Max are not API credentials for this server app. Use provider API keys, Ollama, or another API-compatible gateway.
 
 ---
 
@@ -177,7 +256,9 @@ data/
 From the Admin Console (Campaigns tab):
 
 - **Backup** — writes a SQLite backup + manifest to `data/campaigns/<id>/backups/`
-- **Export** — downloads a full JSON export of campaign state
+- **Download Export** — downloads a full JSON export of campaign state
+- **Write Export** — writes a JSON export into `data/campaigns/<id>/exports/`
+- **Storage Check** — checks SQLite-backed canonical data, journal, trackers, and bard tales
 
 From the campaign Settings page (DM):
 
@@ -201,7 +282,9 @@ Copy `.env.example` to `.env`. Key variables:
 | `LLM_PROVIDER` | `ollama` | `ollama` \| `openai` \| `anthropic` \| `gemini` |
 | `LLM_MODEL` | `qwen2.5:7b` | Model name for the selected provider |
 | `ASR_PROVIDER` | `remote` | `remote` \| `local` \| `whisper-local` \| `groq` \| `openai` |
-| `WHISPER_LOCAL_BASE` | `http://localhost:8000/v1` | Base URL for `whisper-local` provider |
+| `WHISPER_LOCAL_BASE` | `http://ollama.middl.earth.arda:8765` | Base URL for `whisper-local` provider |
+| `WHISPER_LOCAL_PATH` | `/transcribe` | Transcription endpoint path |
+| `WHISPER_LOCAL_API_KEY_HEADER` | `X-API-Key` | Header used when `WHISPER_LOCAL_API_KEY` is set |
 | `DIARIZATION_MODE` | `auto` | `auto` \| `llm` \| `pyannote` |
 
 See `.env.example` for the full list.
@@ -215,3 +298,43 @@ See `.env.example` for the full list.
 - The app uses SQLite via Node's built-in `node:sqlite` (experimental, Node 22+)
 - `server_legacy.js` contains the main pipeline logic — the modular server imports it and will split it out over time
 - Jobs live in memory — a server restart clears running jobs. Re-run the pipeline if that happens.
+- Terminal job snapshots are persisted to `data/jobs.sqlite` so completed/error/cancelled jobs can still be inspected after restart.
+- Runtime secrets and local campaign data are ignored by git via `.gitignore`.
+
+---
+
+## Troubleshooting
+
+### Pipeline finishes but no approval appears
+
+Open the DM campaign desk and check the **Review** tab. Completed imports create a pending proposal in the Approval Queue. If the UI was open before the job finished, refresh campaign state or reload the page.
+
+### Ollama returns HTTP 500 or times out
+
+Use Admin Console -> Diagnostics to confirm Ollama is reachable, then switch the LLM model in Admin Settings. Smaller local models such as `qwen2.5:7b` are often more reliable for quick testing than larger custom models.
+
+### Whisper-local auth fails
+
+Confirm these settings in Admin Settings:
+
+- `WHISPER_LOCAL_BASE`
+- `WHISPER_LOCAL_PATH`
+- `WHISPER_LOCAL_MODEL`
+- `WHISPER_LOCAL_API_KEY_HEADER`
+- API key value
+
+The current wrapper expects:
+
+```bash
+POST /transcribe
+Header: X-API-Key: <key>
+Form field: file=@audio.mp3
+```
+
+### Admin password forgotten
+
+Run:
+
+```bash
+npm run admin:reset
+```

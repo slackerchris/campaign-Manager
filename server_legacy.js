@@ -8,6 +8,7 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { promisify } from 'node:util'
+import { diagnosticRuntimeSnapshot, recentDiagnosticLogs } from './server/services/diagnostics.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -32,8 +33,11 @@ const CHUNK_SECONDS = Number(process.env.WHISPER_CHUNK_SECONDS || 600)
 let ASR_PROVIDER = String(process.env.ASR_PROVIDER || 'remote').toLowerCase()
 
 // Local Whisper API (faster-whisper-server, whisper.cpp server, etc.)
-let WHISPER_LOCAL_BASE = process.env.WHISPER_LOCAL_BASE || 'http://localhost:8000/v1'
-let WHISPER_LOCAL_MODEL = process.env.WHISPER_LOCAL_MODEL || 'whisper-1'
+let WHISPER_LOCAL_BASE = process.env.WHISPER_LOCAL_BASE || 'http://ollama.middl.earth.arda:8765'
+let WHISPER_LOCAL_PATH = process.env.WHISPER_LOCAL_PATH || '/transcribe'
+let WHISPER_LOCAL_MODEL = process.env.WHISPER_LOCAL_MODEL || 'large-v3'
+let WHISPER_LOCAL_API_KEY = process.env.WHISPER_LOCAL_API_KEY || ''
+let WHISPER_LOCAL_API_KEY_HEADER = process.env.WHISPER_LOCAL_API_KEY_HEADER || 'X-API-Key'
 
 // Groq settings (used when ASR_PROVIDER=groq)
 const GROQ_BASE = process.env.GROQ_BASE || 'https://api.groq.com/openai/v1'
@@ -52,7 +56,7 @@ const DIARIZATION_ASR_DEVICE = String(process.env.DIARIZATION_ASR_DEVICE || 'cud
 const DIARIZATION_COMPUTE_TYPE = String(process.env.DIARIZATION_COMPUTE_TYPE || 'float16')
 const DIARIZATION_PYANNOTE_DEVICE = String(process.env.DIARIZATION_PYANNOTE_DEVICE || 'cuda')
 let PYANNOTE_HF_TOKEN = String(process.env.PYANNOTE_HF_TOKEN || process.env.HUGGINGFACE_TOKEN || '')
-const OLLAMA_BASE = process.env.OLLAMA_BASE || 'http://ollama.throne.middl.earth:11434'
+const OLLAMA_BASE = process.env.OLLAMA_BASE || 'http://ollama.middl.earth.arda:11434'
 const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com/v1'
 const ANTHROPIC_BASE = process.env.ANTHROPIC_BASE || 'https://api.anthropic.com/v1'
 const GEMINI_BASE = process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta'
@@ -1099,13 +1103,26 @@ async function loadPersistedAsrConfig() {
   try {
     const saved = await readJson(ASR_CONFIG_FILE, {})
     const p = String(saved?.asrProvider || '').trim().toLowerCase()
-    if (['remote', 'local', 'groq', 'openai'].includes(p)) ASR_PROVIDER = p
+    if (['remote', 'local', 'groq', 'openai', 'whisper-local'].includes(p)) ASR_PROVIDER = p
+    if (saved?.whisperLocalBase) WHISPER_LOCAL_BASE = String(saved.whisperLocalBase).trim()
+    if (saved?.whisperLocalPath) WHISPER_LOCAL_PATH = String(saved.whisperLocalPath).trim()
+    if (saved?.whisperLocalModel) WHISPER_LOCAL_MODEL = String(saved.whisperLocalModel).trim()
+    if (saved?.whisperLocalApiKey) WHISPER_LOCAL_API_KEY = String(saved.whisperLocalApiKey).trim()
+    if (saved?.whisperLocalApiKeyHeader) WHISPER_LOCAL_API_KEY_HEADER = String(saved.whisperLocalApiKeyHeader).trim()
   } catch { /* ignore */ }
 }
 
 async function persistAsrConfig() {
   await fs.mkdir(SECRETS_DIR, { recursive: true })
-  await writeJson(ASR_CONFIG_FILE, { asrProvider: ASR_PROVIDER, updatedAt: Date.now() })
+  await writeJson(ASR_CONFIG_FILE, {
+    asrProvider: ASR_PROVIDER,
+    whisperLocalBase: WHISPER_LOCAL_BASE,
+    whisperLocalPath: WHISPER_LOCAL_PATH,
+    whisperLocalModel: WHISPER_LOCAL_MODEL,
+    whisperLocalApiKey: WHISPER_LOCAL_API_KEY,
+    whisperLocalApiKeyHeader: WHISPER_LOCAL_API_KEY_HEADER,
+    updatedAt: Date.now(),
+  })
 }
 
 function normalizeLexTerm(value = '') {
@@ -1771,7 +1788,10 @@ async function ollamaGenerate(prompt) {
     body: JSON.stringify({ model: LLM_MODEL, prompt, stream: false }),
     signal: AbortSignal.timeout(180000),
   })
-  if (!r.ok) throw new Error(`Ollama HTTP ${r.status}`)
+  if (!r.ok) {
+    const body = await r.text().catch(() => '')
+    throw new Error(`Ollama HTTP ${r.status}${body ? `: ${body.slice(0, 240)}` : ''}`)
+  }
   const j = await r.json()
   return j.response || ''
 }
@@ -2006,8 +2026,13 @@ async function transcribeViaWhisperLocal(filePath) {
   formData.append('model', WHISPER_LOCAL_MODEL)
   formData.append('language', 'en')
   formData.append('response_format', 'verbose_json')
-  const r = await fetch(`${WHISPER_LOCAL_BASE}/audio/transcriptions`, {
+  const base = WHISPER_LOCAL_BASE.replace(/\/+$/, '')
+  const apiPath = WHISPER_LOCAL_PATH.startsWith('/') ? WHISPER_LOCAL_PATH : `/${WHISPER_LOCAL_PATH}`
+  const headers = {}
+  if (WHISPER_LOCAL_API_KEY) headers[WHISPER_LOCAL_API_KEY_HEADER || 'X-API-Key'] = WHISPER_LOCAL_API_KEY
+  const r = await fetch(`${base}${apiPath}`, {
     method: 'POST',
+    headers,
     body: formData,
     signal: AbortSignal.timeout(300000),
   })
@@ -3134,6 +3159,109 @@ async function processTranscriptJob(job) {
 // /api/health is intentionally mounted behind the shared API middleware.
 // Keep it out of completely open access because it exposes infra details.
 export function setupLegacyRoutes(app) {
+app.get('/api/admin/diagnostics', async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin access required' })
+
+  async function probe(url) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) })
+      return { reachable: true, httpStatus: r.status }
+    } catch (err) {
+      return { reachable: false, error: err?.cause?.code || err.message }
+    }
+  }
+
+  async function checkDataDir() {
+    const testFile = path.join(DATA_DIR, `.diagnostics-${Date.now()}`)
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.writeFile(testFile, 'ok')
+      await fs.unlink(testFile)
+      return { writable: true }
+    } catch (err) {
+      return { writable: false, error: err.message }
+    }
+  }
+
+  const campaignEntries = await fs.readdir(CAMPAIGNS_DIR, { withFileTypes: true }).catch(() => [])
+  const campaignCount = campaignEntries.filter((entry) => entry.isDirectory()).length
+  const activeJobs = [...jobs.values()].filter((job) => !['done', 'error', 'cancelled'].includes(String(job.status || '')))
+  const jobStatusCounts = [...jobs.values()].reduce((acc, job) => {
+    const key = String(job.status || 'unknown')
+    acc[key] = (acc[key] || 0) + 1
+    return acc
+  }, {})
+  const recentJobs = [...jobs.values()]
+    .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+    .slice(0, 20)
+    .map((job) => ({
+      id: job.id,
+      status: job.status,
+      stage: job.stage,
+      campaignId: job.campaignId,
+      gameSessionTitle: job.gameSessionTitle,
+      sourceLabel: job.sourceLabel,
+      provider: job.llmProvider || job.reviewerProvider || null,
+      model: job.llmModel || job.reviewerModel || null,
+      progressPct: job.progressPct,
+      error: job.error,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    }))
+
+  const ollamaEndpoint = OLLAMA_BASE.replace(/\/+$/, '')
+  const whisperLocalEndpoint = WHISPER_LOCAL_BASE.replace(/\/+$/, '')
+  const [dataDir, ollama, whisperLocal] = await Promise.all([
+    checkDataDir(),
+    probe(`${ollamaEndpoint}/api/tags`),
+    probe(`${whisperLocalEndpoint}/health`),
+  ])
+
+  res.json({
+    ok: true,
+    runtime: diagnosticRuntimeSnapshot(),
+    paths: {
+      dataDir: DATA_DIR,
+      campaignsDir: CAMPAIGNS_DIR,
+      distDir: DIST_DIR,
+    },
+    config: {
+      asrProvider: ASR_PROVIDER,
+      whisperModel: WHISPER_MODEL,
+      whisperDevice: WHISPER_DEVICE,
+      whisperLocalBase: WHISPER_LOCAL_BASE,
+      whisperLocalPath: WHISPER_LOCAL_PATH,
+      whisperLocalModel: WHISPER_LOCAL_MODEL,
+      whisperLocalApiKeyHeader: WHISPER_LOCAL_API_KEY_HEADER,
+      hasWhisperLocalApiKey: !!WHISPER_LOCAL_API_KEY,
+      groqModel: GROQ_WHISPER_MODEL,
+      hasGroqKey: !!GROQ_API_KEY,
+      hasOpenaiKey: !!OPENAI_API_KEY,
+      hasAnthropicKey: !!ANTHROPIC_API_KEY,
+      hasGeminiKey: !!GEMINI_API_KEY,
+      hasPyannoteToken: !!PYANNOTE_HF_TOKEN,
+      diarizationMode: DIARIZATION_MODE,
+      llmProvider: LLM_PROVIDER,
+      llmModel: LLM_MODEL,
+      maxConcurrentJobs: MAX_CONCURRENT_JOBS,
+      maxUploadBytes: MAX_UPLOAD_BYTES,
+    },
+    counts: {
+      campaigns: campaignCount,
+      jobs: jobs.size,
+      activeJobs: activeJobs.length,
+      jobStatusCounts,
+    },
+    health: {
+      dataDir,
+      ollama: { endpoint: ollamaEndpoint, ...ollama },
+      whisperLocal: { endpoint: whisperLocalEndpoint, ...whisperLocal },
+    },
+    jobs: recentJobs,
+    logs: recentDiagnosticLogs(Number(req.query?.limit) || 120),
+  })
+})
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -3157,6 +3285,83 @@ app.get('/api/health', (_req, res) => {
     anthropicRetryBaseMs: ANTHROPIC_RETRY_BASE_MS,
     anthropicMinGapMs: ANTHROPIC_MIN_GAP_MS,
     ollamaBase: OLLAMA_BASE,
+  })
+})
+
+app.get('/api/health/pipeline', async (req, res) => {
+  if (!req.user || !['admin', 'dm'].includes(req.user.role)) {
+    return res.status(403).json({ ok: false, error: 'Forbidden' })
+  }
+
+  async function probe(url) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) })
+      return { reachable: true, httpStatus: r.status }
+    } catch (err) {
+      return { reachable: false, error: err?.cause?.code || err.message }
+    }
+  }
+
+  async function checkDataDir() {
+    const testFile = path.join(DATA_DIR, `.health-${Date.now()}`)
+    try {
+      await fs.writeFile(testFile, 'ok')
+      await fs.unlink(testFile)
+      return { writable: true, path: DATA_DIR }
+    } catch (err) {
+      return { writable: false, path: DATA_DIR, error: err.message }
+    }
+  }
+
+  async function checkAsr() {
+    const base = { provider: ASR_PROVIDER }
+    if (ASR_PROVIDER === 'whisper-local') {
+      const endpoint = WHISPER_LOCAL_BASE.replace(/\/+$/, '')
+      const result = await probe(`${endpoint}/health`)
+      return { ...base, endpoint, path: WHISPER_LOCAL_PATH, model: WHISPER_LOCAL_MODEL, ...result }
+    }
+    if (ASR_PROVIDER === 'groq') {
+      return { ...base, endpoint: GROQ_BASE, model: GROQ_WHISPER_MODEL, reachable: !!GROQ_API_KEY, error: GROQ_API_KEY ? undefined : 'No API key configured' }
+    }
+    if (ASR_PROVIDER === 'openai') {
+      return { ...base, endpoint: OPENAI_BASE, model: 'whisper-1', reachable: !!OPENAI_API_KEY, error: OPENAI_API_KEY ? undefined : 'No API key configured' }
+    }
+    if (ASR_PROVIDER === 'remote') {
+      return { ...base, endpoint: `${SSH_USER}@${SSH_HOST}`, model: WHISPER_MODEL, reachable: null, note: 'SSH — not probed' }
+    }
+    if (ASR_PROVIDER === 'local') {
+      return { ...base, endpoint: 'container', model: WHISPER_MODEL, device: WHISPER_DEVICE, reachable: null, note: 'Local CLI — not probed' }
+    }
+    return { ...base, reachable: false, error: 'Unknown provider' }
+  }
+
+  async function checkLlm() {
+    const base = { provider: LLM_PROVIDER, model: LLM_MODEL }
+    if (LLM_PROVIDER === 'ollama') {
+      const result = await probe(`${OLLAMA_BASE}/api/tags`)
+      return { ...base, endpoint: OLLAMA_BASE, ...result }
+    }
+    if (LLM_PROVIDER === 'openai') {
+      return { ...base, endpoint: OPENAI_BASE, reachable: !!OPENAI_API_KEY, error: OPENAI_API_KEY ? undefined : 'No API key configured' }
+    }
+    if (LLM_PROVIDER === 'anthropic') {
+      return { ...base, endpoint: ANTHROPIC_BASE, reachable: !!ANTHROPIC_API_KEY, error: ANTHROPIC_API_KEY ? undefined : 'No API key configured' }
+    }
+    if (LLM_PROVIDER === 'gemini') {
+      return { ...base, endpoint: GEMINI_BASE, reachable: !!GEMINI_API_KEY, error: GEMINI_API_KEY ? undefined : 'No API key configured' }
+    }
+    return { ...base, reachable: false, error: 'Unknown provider' }
+  }
+
+  const [asr, llm, dataDir] = await Promise.all([checkAsr(), checkLlm(), checkDataDir()])
+  res.json({
+    ok: true,
+    asr,
+    llm,
+    dataDir,
+    uploadLimitBytes: MAX_UPLOAD_BYTES,
+    chunkSeconds: CHUNK_SECONDS,
+    maxConcurrentJobs: MAX_CONCURRENT_JOBS,
   })
 })
 
@@ -3371,7 +3576,10 @@ app.get('/api/asr/config', (_req, res) => {
     groqModel: GROQ_WHISPER_MODEL,
     remoteHost: `${SSH_USER}@${SSH_HOST}`,
     whisperLocalBase: WHISPER_LOCAL_BASE,
+    whisperLocalPath: WHISPER_LOCAL_PATH,
     whisperLocalModel: WHISPER_LOCAL_MODEL,
+    whisperLocalApiKeyHeader: WHISPER_LOCAL_API_KEY_HEADER,
+    hasWhisperLocalApiKey: !!WHISPER_LOCAL_API_KEY,
   })
 })
 
@@ -3383,10 +3591,21 @@ app.put('/api/asr/config', async (req, res) => {
   if (provider === 'groq' && !GROQ_API_KEY) return res.status(400).json({ ok: false, error: 'Groq API key not set — save it first' })
   if (provider === 'openai' && !OPENAI_API_KEY) return res.status(400).json({ ok: false, error: 'OpenAI API key not set — save it first' })
   if (req.body?.whisperLocalBase) WHISPER_LOCAL_BASE = String(req.body.whisperLocalBase).trim()
+  if (req.body?.whisperLocalPath) WHISPER_LOCAL_PATH = String(req.body.whisperLocalPath).trim()
   if (req.body?.whisperLocalModel) WHISPER_LOCAL_MODEL = String(req.body.whisperLocalModel).trim()
+  if (req.body?.whisperLocalApiKey) WHISPER_LOCAL_API_KEY = String(req.body.whisperLocalApiKey).trim()
+  if (req.body?.whisperLocalApiKeyHeader) WHISPER_LOCAL_API_KEY_HEADER = String(req.body.whisperLocalApiKeyHeader).trim()
   ASR_PROVIDER = provider
   await persistAsrConfig()
-  res.json({ ok: true, asrProvider: ASR_PROVIDER, whisperLocalBase: WHISPER_LOCAL_BASE, whisperLocalModel: WHISPER_LOCAL_MODEL })
+  res.json({
+    ok: true,
+    asrProvider: ASR_PROVIDER,
+    whisperLocalBase: WHISPER_LOCAL_BASE,
+    whisperLocalPath: WHISPER_LOCAL_PATH,
+    whisperLocalModel: WHISPER_LOCAL_MODEL,
+    whisperLocalApiKeyHeader: WHISPER_LOCAL_API_KEY_HEADER,
+    hasWhisperLocalApiKey: !!WHISPER_LOCAL_API_KEY,
+  })
 })
 
 app.get('/api/campaigns', async (req, res) => {

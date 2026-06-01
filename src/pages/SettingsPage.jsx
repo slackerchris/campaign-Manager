@@ -22,8 +22,11 @@ export default function SettingsPage() {
   const [groqKeyStatus, setGroqKeyStatus] = useState('')
   const [groqHasKey, setGroqHasKey] = useState(false)
   const [asrInfo, setAsrInfo] = useState(null)
-  const [whisperLocalBase, setWhisperLocalBase] = useState('http://localhost:8000/v1')
-  const [whisperLocalModel, setWhisperLocalModel] = useState('whisper-1')
+  const [whisperLocalBase, setWhisperLocalBase] = useState('http://ollama.middl.earth.arda:8765')
+  const [whisperLocalPath, setWhisperLocalPath] = useState('/transcribe')
+  const [whisperLocalModel, setWhisperLocalModel] = useState('large-v3')
+  const [whisperLocalApiKey, setWhisperLocalApiKey] = useState('')
+  const [whisperLocalApiKeyHeader, setWhisperLocalApiKeyHeader] = useState('X-API-Key')
 
   // ── LLM state ─────────────────────────────────────────────────────────────
   const [llmStatus, setLlmStatus] = useState('')
@@ -38,6 +41,20 @@ export default function SettingsPage() {
   const [geminiKeyStatus, setGeminiKeyStatus] = useState('')
   const [pyannoteToken, setPyannoteToken] = useState('')
   const [pyannoteTokenStatus, setPyannoteTokenStatus] = useState('')
+
+  // ── health state ─────────────────────────────────────────────────────────
+  const [health, setHealth] = useState(null)
+  const [healthLoading, setHealthLoading] = useState(false)
+
+  async function runHealthCheck() {
+    setHealthLoading(true)
+    try {
+      const r = await apiFetch(`${API_BASE}/health/pipeline`)
+      const j = await r.json()
+      if (j.ok) setHealth(j)
+    } catch { /* ignore */ }
+    setHealthLoading(false)
+  }
 
   // ── SQLite state ──────────────────────────────────────────────────────────
   const [sqlStorageStatus, setSqlStorageStatus] = useState('')
@@ -60,7 +77,9 @@ export default function SettingsPage() {
         setGroqHasKey(!!j.hasGroqKey)
         setAsrInfo(j)
         if (j.whisperLocalBase) setWhisperLocalBase(j.whisperLocalBase)
+        if (j.whisperLocalPath) setWhisperLocalPath(j.whisperLocalPath)
         if (j.whisperLocalModel) setWhisperLocalModel(j.whisperLocalModel)
+        if (j.whisperLocalApiKeyHeader) setWhisperLocalApiKeyHeader(j.whisperLocalApiKeyHeader)
       }
     } catch { /* ignore */ }
   }
@@ -70,7 +89,7 @@ export default function SettingsPage() {
     const r = await apiFetch(`${API_BASE}/asr/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ asrProvider: provider, whisperLocalBase, whisperLocalModel }),
+      body: JSON.stringify({ asrProvider: provider, whisperLocalBase, whisperLocalPath, whisperLocalModel, whisperLocalApiKey, whisperLocalApiKeyHeader }),
     })
     const j = await r.json()
     if (!r.ok || !j.ok) { setAsrStatus(`Failed: ${j.error || 'unknown error'}`); return }
@@ -83,11 +102,12 @@ export default function SettingsPage() {
     const r = await apiFetch(`${API_BASE}/asr/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ asrProvider: 'whisper-local', whisperLocalBase, whisperLocalModel }),
+      body: JSON.stringify({ asrProvider: 'whisper-local', whisperLocalBase, whisperLocalPath, whisperLocalModel, whisperLocalApiKey, whisperLocalApiKeyHeader }),
     })
     const j = await r.json()
     if (!r.ok || !j.ok) { setAsrStatus(`Failed: ${j.error || 'unknown error'}`); return }
     setAsrProvider(j.asrProvider)
+    setWhisperLocalApiKey('')
     setAsrStatus('Whisper local config saved')
   }
 
@@ -250,6 +270,62 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
 
+      {/* Pipeline Health */}
+      <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-xl font-semibold">Pipeline Health</h2>
+            <p className="mt-1 text-sm text-slate-400">Live connectivity check for ASR, LLM, and storage.</p>
+          </div>
+          <button
+            onClick={runHealthCheck}
+            disabled={healthLoading}
+            className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-50"
+          >
+            {healthLoading ? 'Checking…' : 'Run Check'}
+          </button>
+        </div>
+
+        {health && (
+          <div className="mt-4 space-y-2 font-mono text-sm">
+            <HealthRow label="ASR provider" value={health.asr.provider} />
+            {health.asr.endpoint && <HealthRow label="ASR endpoint" value={health.asr.endpoint} />}
+            {health.asr.model && <HealthRow label="ASR model" value={health.asr.model} />}
+            <HealthRow
+              label="ASR status"
+              value={health.asr.reachable === null ? health.asr.note : health.asr.reachable ? 'reachable' : `failed — ${health.asr.error || 'unreachable'}`}
+              status={health.asr.reachable === null ? 'neutral' : health.asr.reachable ? 'ok' : 'error'}
+            />
+
+            <div className="border-t border-slate-800 my-1" />
+
+            <HealthRow label="LLM provider" value={health.llm.provider} />
+            {health.llm.endpoint && <HealthRow label="LLM endpoint" value={health.llm.endpoint} />}
+            <HealthRow label="LLM model" value={health.llm.model} />
+            <HealthRow
+              label="LLM status"
+              value={health.llm.reachable ? 'reachable' : `failed — ${health.llm.error || 'unreachable'}`}
+              status={health.llm.reachable ? 'ok' : 'error'}
+            />
+
+            <div className="border-t border-slate-800 my-1" />
+
+            <HealthRow label="Data dir" value={health.dataDir.path} />
+            <HealthRow
+              label="Data dir status"
+              value={health.dataDir.writable ? 'writable' : `failed — ${health.dataDir.error}`}
+              status={health.dataDir.writable ? 'ok' : 'error'}
+            />
+
+            <div className="border-t border-slate-800 my-1" />
+
+            <HealthRow label="Upload limit" value={`${Math.round(health.uploadLimitBytes / 1024 / 1024)} MB`} />
+            <HealthRow label="Chunk size" value={`${health.chunkSeconds} seconds`} />
+            <HealthRow label="Max concurrent jobs" value={String(health.maxConcurrentJobs)} />
+          </div>
+        )}
+      </div>
+
       {/* ASR Provider */}
       <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5">
         <h2 className="text-xl font-semibold">Audio Transcription (ASR) Provider</h2>
@@ -285,24 +361,45 @@ export default function SettingsPage() {
         {asrStatus && <div className="mt-2 text-xs text-amber-300">{asrStatus}</div>}
         {asrProvider === 'whisper-local' && (
           <div className="mt-3 space-y-2 border-t border-slate-800 pt-3">
-            <div className="text-xs text-slate-500">Local API endpoint and model name. Compatible with faster-whisper-server, whisper.cpp server, or any OpenAI-compatible transcription API.</div>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-center">
+            <div className="text-xs text-slate-500">Local API endpoint, path, model, and optional API key header.</div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_160px] gap-2 items-center">
               <input
                 value={whisperLocalBase}
                 onChange={(e) => setWhisperLocalBase(e.target.value)}
-                placeholder="http://localhost:8000/v1"
+                placeholder="http://ollama.middl.earth.arda:8765"
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
+              />
+              <input
+                value={whisperLocalPath}
+                onChange={(e) => setWhisperLocalPath(e.target.value)}
+                placeholder="/transcribe"
                 className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
               />
               <input
                 value={whisperLocalModel}
                 onChange={(e) => setWhisperLocalModel(e.target.value)}
-                placeholder="whisper-1"
+                placeholder="large-v3"
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_auto] gap-2 items-center">
+              <input
+                value={whisperLocalApiKeyHeader}
+                onChange={(e) => setWhisperLocalApiKeyHeader(e.target.value)}
+                placeholder="X-API-Key"
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
+              />
+              <input
+                value={whisperLocalApiKey}
+                onChange={(e) => setWhisperLocalApiKey(e.target.value)}
+                placeholder={asrInfo?.hasWhisperLocalApiKey ? 'API key saved' : 'API key'}
+                type="password"
                 className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
               />
               <button onClick={saveWhisperLocalConfig} className="rounded-xl border border-amber-700 text-amber-300 px-4 py-2 text-sm">Save</button>
             </div>
             <div className="text-xs text-slate-600">
-              faster-whisper-server: <span className="text-slate-500 font-mono">docker run -p 8000:8000 fedirz/faster-whisper-server</span>
+              Your wrapper: <span className="text-slate-500 font-mono">POST /transcribe</span> with <span className="text-slate-500 font-mono">X-API-Key</span>.
             </div>
           </div>
         )}
@@ -481,6 +578,29 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function HealthRow({ label, value, status }) {
+  const dot = status === 'ok'
+    ? 'bg-emerald-400'
+    : status === 'error'
+      ? 'bg-rose-400'
+      : 'bg-slate-500'
+  const text = status === 'ok'
+    ? 'text-emerald-300'
+    : status === 'error'
+      ? 'text-rose-300'
+      : 'text-slate-300'
+
+  return (
+    <div className="flex items-baseline gap-3">
+      <span className="w-44 shrink-0 text-slate-500 text-xs">{label}</span>
+      <span className={`flex items-center gap-1.5 ${status ? text : 'text-slate-200'}`}>
+        {status && <span className={`inline-block h-1.5 w-1.5 rounded-full shrink-0 ${dot}`} />}
+        {value}
+      </span>
     </div>
   )
 }

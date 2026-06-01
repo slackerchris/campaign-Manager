@@ -137,6 +137,15 @@ export function AppProvider({ children }) {
         }
       } catch { /* ignore */ }
     }
+    // Fallback for players: campaign list returns empty for player role,
+    // so fetch the campaign meta directly using their campaign-level session token.
+    if (!campaign) {
+      try {
+        const r = await apiFetch(`${API_BASE}/campaigns/${campaignId}/meta`)
+        const j = await r.json()
+        if (j.ok && j.campaign) campaign = j.campaign
+      } catch { /* ignore */ }
+    }
     if (!campaign) return
     if (activeCampaign?.id === campaignId) return // already loaded
     setActiveCampaign(campaign)

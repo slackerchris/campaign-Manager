@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../AppContext.jsx'
+import { useAuth } from '../AuthContext.jsx'
+import { apiFetch } from '../lib/api.js'
 
 export default function PlayerPage() {
   const {
@@ -7,6 +9,8 @@ export default function PlayerPage() {
     setShowAddPc, openEditPc,
     submitPlayerContribution, addPlayerQuoteDirect,
   } = useApp()
+  const { user } = useAuth()
+  const isDm = ['dm', 'admin'].includes(user?.role)
 
   const sortedSessions = (state.gameSessions || []).slice().sort((a, b) => {
     const na = Number(String(a?.title || '').match(/\d+/)?.[0] || 0)
@@ -20,10 +24,45 @@ export default function PlayerPage() {
 
   // ── player submission state ───────────────────────────────────────────────
   const [playerSessionId, setPlayerSessionId] = useState('')
-  const [playerSubmissionName, setPlayerSubmissionName] = useState('')
+  const [playerSubmissionName, setPlayerSubmissionName] = useState(user?.displayName || '')
   const [playerSubmissionType, setPlayerSubmissionType] = useState('note')
   const [playerSubmissionText, setPlayerSubmissionText] = useState('')
   const [playerSubmissionStatus, setPlayerSubmissionStatus] = useState('')
+
+  // ── invite player state ───────────────────────────────────────────────────
+  const [serverUsers, setServerUsers] = useState([])
+  const [userSearch, setUserSearch] = useState('')
+  const [inviteStatus, setInviteStatus] = useState('')
+  const [inviteError, setInviteError] = useState('')
+
+  async function loadServerUsers() {
+    if (serverUsers.length) return
+    try {
+      const r = await apiFetch('/api/server/users')
+      const j = await r.json()
+      if (j.ok) setServerUsers(j.users)
+    } catch { /* ignore */ }
+  }
+
+  async function sendDirectInvite(user) {
+    if (!activeCampaign) return
+    setInviteStatus('Sending...')
+    setInviteError('')
+    try {
+      const r = await apiFetch(`/api/campaigns/${activeCampaign.id}/auth/direct-invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetServerUserId: user.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Invite failed')
+      setInviteStatus(`Invite sent to ${user.displayName}`)
+      setUserSearch('')
+    } catch (err) {
+      setInviteError(err.message)
+      setInviteStatus('')
+    }
+  }
 
   // ── quote state ───────────────────────────────────────────────────────────
   const [playerQuoteText, setPlayerQuoteText] = useState('')
@@ -70,7 +109,7 @@ export default function PlayerPage() {
             <div className="text-[11px] font-semibold uppercase text-amber-400/80">Party</div>
             <h2 className="text-base font-semibold">Player Characters</h2>
           </div>
-          <button onClick={() => setShowAddPc(true)} className="rounded-md border border-emerald-700 text-emerald-300 px-3 py-1.5 text-sm">Add PC</button>
+          {isDm && <button onClick={() => setShowAddPc(true)} className="rounded-md border border-emerald-700 text-emerald-300 px-3 py-1.5 text-sm">Add PC</button>}
         </div>
         <div className="mt-3 space-y-2">
           {(state.pcs || []).map((pc) => (
@@ -88,20 +127,70 @@ export default function PlayerPage() {
         </div>
       </div>
 
+      {/* Invite Player — DM only */}
+      {isDm && <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-4" onClick={loadServerUsers}>
+        <div className="text-[11px] font-semibold uppercase text-amber-400/80">Party</div>
+        <h2 className="text-base font-semibold">Invite Player</h2>
+        <p className="mt-1 text-sm text-slate-400">Search for a registered account and send them a campaign invite. They'll see it on their player home.</p>
+        <input
+          value={userSearch}
+          onChange={(e) => setUserSearch(e.target.value)}
+          placeholder="Search by name or username..."
+          className="mt-3 w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-amber-600"
+        />
+        {inviteError && <div className="mt-2 text-xs text-rose-400">{inviteError}</div>}
+        {inviteStatus && <div className="mt-2 text-xs text-emerald-400">{inviteStatus}</div>}
+        <div className="mt-2 space-y-1">
+          {serverUsers
+            .filter((u) => {
+              if (!userSearch.trim()) return false
+              const q = userSearch.toLowerCase()
+              return u.username.includes(q) || u.displayName.toLowerCase().includes(q)
+            })
+            .slice(0, 6)
+            .map((u) => (
+              <div key={u.id} className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2">
+                <div>
+                  <div className="text-sm text-slate-100">{u.displayName}</div>
+                  <div className="text-xs text-slate-500">@{u.username}</div>
+                </div>
+                <button
+                  onClick={() => sendDirectInvite(u)}
+                  className="rounded-md border border-amber-700 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
+                >
+                  Invite
+                </button>
+              </div>
+            ))}
+          {userSearch.trim() && serverUsers.filter((u) => {
+            const q = userSearch.toLowerCase()
+            return u.username.includes(q) || u.displayName.toLowerCase().includes(q)
+          }).length === 0 && (
+            <div className="text-xs text-slate-500 mt-2">No users found.</div>
+          )}
+        </div>
+      </div>}
+
       {/* Player Contributions */}
       <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-4">
         <div className="text-[11px] font-semibold uppercase text-amber-400/80">Player Desk</div>
         <h2 className="text-base font-semibold">Session Notes</h2>
         <p className="mt-1 text-sm text-slate-400">Send notes, corrections, and discoveries back to the campaign record.</p>
         <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
-          <select
-            value={playerSubmissionName}
-            onChange={(e) => setPlayerSubmissionName(e.target.value)}
-            className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
-          >
-            <option value="">Select player…</option>
-            {playerNameOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
+          {isDm ? (
+            <select
+              value={playerSubmissionName}
+              onChange={(e) => setPlayerSubmissionName(e.target.value)}
+              className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-sm"
+            >
+              <option value="">Select player…</option>
+              {playerNameOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          ) : (
+            <div className="rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-400">
+              {user?.displayName || 'You'}
+            </div>
+          )}
           <select
             value={playerSubmissionType}
             onChange={(e) => setPlayerSubmissionType(e.target.value)}
