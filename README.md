@@ -1,174 +1,217 @@
-# DND Dashboard
+# Campaign Manager
 
-A campaign management web app for an ongoing D&D game.
+A self-hosted web app for running D&D campaigns. Handles session transcripts, canon management, player workspaces, and an AI-assisted approval pipeline — all stored locally in SQLite.
 
-The project combines a React frontend with an Express API. It handles campaign state, player-facing and DM-facing workflows, transcript ingestion, approval-driven canon updates, and a SQLite-first persistence model.
+---
 
 ## What It Does
 
-- Create and manage campaigns stored under `data/campaigns/`
-- Track player characters, sessions, approvals, quotes, journals, DM notes, lexicon terms, places, bard tales, and DM sneak-peek items
-- Import reference data from PDFs and `dnd-data`
-- Run a transcription pipeline for audio or transcript uploads
-- Keep pipeline output in an approval queue until the DM approves changes
-- Complete multi-tenant roles across campaign participants (DM vs Player Workspaces)
-- Persist campaign state and authentication contexts entirely in SQLite.
+- **Multi-campaign** — each DM runs separate campaigns independently
+- **Session pipeline** — upload audio or a transcript, run it through Whisper + an LLM, and get structured NPC updates, quest changes, and journal entries staged for approval
+- **Approval queue** — the DM reviews and approves AI-generated changes before they become canon
+- **Lexicon** — searchable canon entries: NPCs, monsters, places, quests, items, factions, and terms. NPCs and monsters carry a D&D creature type (humanoid, undead, dragon, etc.)
+- **Player workspaces** — each player has their own view of the campaign with visibility controls
+- **Multi-user auth** — admin, DM, and player roles with server-level accounts and per-campaign sessions
 
-## Architecture
+---
 
-- `src/` — React app
-- `server.mjs` — Express API entry point
-- `server/` — Backend modules (routes, middleware, import pipeline, persistence, and migration helpers)
-- `data/campaigns/<campaign-id>/` — per-campaign `campaign.sqlite` plus filesystem artifact directories
-- `docs/PIPELINE_CHATGPT_MODE.md` — transcription pipeline behavior and configuration
+## Roles
 
-The app uses a campaign shell layout (`CampaignLayout`) with a flat top nav that automatically adjusts visibility depending on the currently authenticated User Role:
+| Role | Gets |
+|------|------|
+| **Admin** | Server console — manages users, invites DMs, configures API keys and ASR/LLM settings, handles campaign backups |
+| **DM** | Campaign desk — creates campaigns, imports sessions, manages canon, invites players |
+| **Player** | Player home — sees their campaigns, accepts DM invites, accesses their workspace |
 
-- **Dashboard** — stat cards, PC avatars, recent journal entries
-- **Admin Setup & Login Gateways** — `/setup` claims a fresh installation, and `/campaigns/:id/login` centralizes the passwordless Player Invite flow alongside the DM system unlock.
-- **DM** — DM-only workflows split across four tabs:
-  - *Session* — session manager, transcription pipeline, module PDF import
-  - *Review* — import highlights, approval queue, journal + transcript viewer
-  - *Campaign* — PC list, DM notes, sneak-peek editor
-  - *Tools* — data browser
-- **Player Workspaces** — personal player environments containing dedicated contextual views
-- **Lexicon** — searchable canon entries (NPCs, places, terms)
-- **Settings** — LLM config, ASR config, API key management
+---
 
-A **←** link in the nav returns to the multi-campaign selector.
+## Quick Start
 
-## Local Development
-
-Requirements:
+### Requirements
 
 - Node.js 22+
 - npm
 
-Install dependencies:
+### Install and run
 
 ```bash
+git clone https://github.com/slackerchris/campaign-Manager.git
+cd campaign-Manager
 npm install
-```
-
-Copy the example env file and fill in values:
-
-```bash
 cp .env.example .env
+# Edit .env with your API keys and settings
 ```
 
-Run the frontend:
-
-```bash
-npm run dev
-```
-
-Run the API:
+Run the API server:
 
 ```bash
 npm run api
 ```
 
-Default ports:
+Run the frontend (development):
 
-- frontend: `5173`
-- API: `8790`
+```bash
+npm run dev
+```
 
-The Vite dev server proxies `/api` requests to `http://127.0.0.1:8790`.
+| Service | Port |
+|---------|------|
+| API | `8790` |
+| Vite dev server | `5173` (proxies `/api` to `8790`) |
+
+### First run
+
+On first visit the app redirects to `/setup` where you create the admin account. After that:
+
+1. Admin logs in at `/login` and goes to the Admin Console
+2. Admin creates a DM invite link and sends it to the DM
+3. DM creates their account, logs in, and creates a campaign
+4. DM invites players from the Campaign tab (search by username)
+5. Players sign up at `/login`, see the invite on their player home, and accept
+
+---
 
 ## Docker
-
-Build and run with Docker Compose:
 
 ```bash
 docker compose up --build
 ```
 
-The container serves the built React app and the Express API on port `8790`.
+The container serves both the built React app and the API on port `8790`. Campaign data mounts from `./data`.
 
-Container notes:
+To include local Whisper support (adds ~5 GB to image size):
 
-- campaign data is mounted from `./data` into `/app/data`
-- the image includes `python3`, `ffmpeg`, `openssh-client`, and `pdftotext` support via `poppler-utils`
-- Python packages are installed into a venv at `/opt/venv` (not system-wide)
-- `DIARIZATION_MODE=pyannote` still requires the relevant Python packages inside the container or a derived image that installs them
+```bash
+./install.sh install-asr
+```
 
-## Persistence Model
+---
 
-The app is SQLite-first for campaign state.
+## Authentication
 
-- `campaign.sqlite` is the source of truth for all metadata. It internally isolates Data Tables (`users`, `invites`, `sessions_auth`, `journal_entries`, `lexicon_entities`, `tracker_rows`) preventing cross-contamination across sessions.
-- Component row visibility is natively protected via `user_id` and `visibility` restrictions enforced by back-end middleware constraints.
-- `meta.json`, raw `sessions/` snapshots, and import artifacts under `imports/` still live on disk outside the SQLite database.
+Two layers work together:
 
-Common campaign files include:
+**Server-level accounts** (stored in `data/secrets/admin-auth.json`)
+- Admin, DM, and Player accounts with username + password
+- Sessions last 30 days
+- Players can self-register at `/login` — they won't see anything until a DM invites them to a campaign
 
-- `meta.json`
-- `campaign.sqlite`
-- `exports/`
-- `backups/`
-- `sessions/`
-- `imports/`
+**Campaign-level sessions** (stored in each campaign's SQLite)
+- Issued when a player joins a campaign via invite code
+- Scoped to that campaign
+- Linked back to the player's server account via `server_user_id`
 
-## Export And Backup
+### Recovering admin access
 
-- `GET /api/campaigns/:id/export` returns a JSON export payload from live SQLite-backed state.
-- `POST /api/campaigns/:id/export` writes that payload to `data/campaigns/<campaign-id>/exports/`.
-- `POST /api/campaigns/:id/backup` writes a SQLite backup and manifest to `data/campaigns/<campaign-id>/backups/`.
+```bash
+npm run admin:reset
+```
 
-## Security
+---
 
-- **Initial Setup**: A fresh instance redirects to `/setup` so you can create the first server admin account.
-- **Admin Recovery**: If you forget the admin password, reset it from the server terminal with `npm run admin:reset`.
-- **Dynamic Role-Gating Auth**: Admins sign in with username/password. Players join campaigns with generated invite codes. Session tokens are issued automatically and managed in `localStorage`.
-- **CORS**: set `CORS_ORIGINS` to a comma-separated list of allowed origins. Defaults to `localhost` only when unset.
-- **Body size**: JSON request bodies are capped at 10 MB and file uploads default to 200 MB (`MAX_UPLOAD_BYTES`).
-- **Job concurrency**: at most `MAX_CONCURRENT_JOBS` (default 3) transcription jobs run simultaneously; further requests receive HTTP 429.
+## Transcript Pipeline
 
-## Important Environment Variables
+Upload a session audio file or plain text transcript. The pipeline:
 
-See [`.env.example`](.env.example) for the full list with descriptions. Key variables:
+1. **Transcribes** audio via the configured ASR provider
+2. **Diarizes** speakers (via pyannote or LLM-based heuristics)
+3. **Extracts** NPC updates, quest changes, quotes, and a journal entry using the configured LLM
+4. **Stages** everything in the approval queue — nothing becomes canon until the DM approves
 
-- `API_PORT` — listening port (default `8790`)
-- `DATA_DIR` — path to campaign data directory (default `./data`)
-- `CORS_ORIGINS` — comma-separated allowed origins (unset = localhost only)
-- `MAX_UPLOAD_BYTES` — max file upload size in bytes (default 200 MB)
-- `JOB_RETENTION_MS` — how long completed jobs are kept in memory
-- `MAX_RETAINED_JOBS` — max number of jobs to keep in memory
-- `MAX_CONCURRENT_JOBS` — max simultaneous transcription jobs (default 3)
-- `CAMPAIGN_DB_CACHE_MAX` — max open SQLite connections in LRU cache (default 10)
+### ASR Providers
 
-LLM and pipeline:
+| Provider | Notes |
+|----------|-------|
+| `remote` | SSH to a GPU host running Whisper (default) |
+| `local` | Whisper CLI inside the container |
+| `whisper-local` | Any OpenAI-compatible local API (faster-whisper-server, whisper.cpp, etc.) |
+| `groq` | Groq Cloud — free, fast. Requires `GROQ_API_KEY` |
+| `openai` | OpenAI whisper-1. Requires `OPENAI_API_KEY` |
 
-- `LLM_PROVIDER` — `ollama` | `openai` | `anthropic` | `gemini`
-- `LLM_MODEL`
-- `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `GEMINI_API_KEY`
-- `PIPELINE_CHATGPT_ONLY` — force all pipeline calls through OpenAI
-- `PIPELINE_OPENAI_MODEL`
-- `PIPELINE_OPENAI_FALLBACK_MODEL`
+**Quickest local setup** for `whisper-local`:
 
-Diarization and audio processing:
+```bash
+docker run -p 8000:8000 fedirz/faster-whisper-server
+```
 
-- `DIARIZATION_MODE` — `auto` | `llm` | `pyannote`
-- `DIARIZATION_ASR_MODEL`
-- `DIARIZATION_ASR_DEVICE`
-- `DIARIZATION_COMPUTE_TYPE`
-- `DIARIZATION_PYANNOTE_DEVICE`
-- `PYANNOTE_HF_TOKEN`
-- `ASR_PROVIDER` — `remote` | `local` | `groq` | `openai`
-- `OLLAMA_SSH_KEY`
-- `OLLAMA_SSH_USER`
-- `OLLAMA_SSH_HOST`
-- `REMOTE_AUDIO_DIR`
-- `REMOTE_OUT_DIR`
-- `WHISPER_MODEL`
-- `WHISPER_DEVICE`
-- `WHISPER_CHUNK_SECONDS`
-- `GROQ_API_KEY`
-- `GROQ_WHISPER_MODEL`
+Then set `ASR_PROVIDER=whisper-local` in Settings.
 
-## Notes
+### LLM Providers
 
-- The transcription pipeline can run in flexible mode (any configured LLM) or legacy ChatGPT-locked mode (`PIPELINE_CHATGPT_ONLY=true`).
-- Audio jobs snapshot the active `LLM_PROVIDER`, `LLM_MODEL`, and `ASR_PROVIDER` at creation time so live settings changes don't affect running jobs.
+Ollama, OpenAI, Anthropic, and Google Gemini are all supported. Switch between them in the Admin Console or campaign Settings without restarting.
+
+---
+
+## Lexicon & Canon
+
+Each campaign keeps its own canon entries. Each entry has:
+
+- **Kind** — `npc`, `monster`, `place`, `quest`, `item`, `faction`, or `term`
+- **Creature type** — the D&D creature type (humanoid, undead, dragon, etc.) for NPCs and monsters
+- **Role**, **relation**, **aliases**, **notes**
+
+NPCs and monsters are distinct by role, not type — the same goblin can be an NPC when negotiating and a monster in combat. Both share the same 14 D&D creature types.
+
+---
+
+## Data Layout
+
+```
+data/
+  secrets/
+    admin-auth.json        # server accounts and sessions
+  campaigns/
+    <campaign-id>/
+      meta.json            # name, owner, created date
+      campaign.sqlite      # all campaign data
+      sessions/            # raw session snapshots
+      imports/             # pipeline import artifacts
+      exports/             # JSON exports
+      backups/             # SQLite backups
+```
+
+---
+
+## Backup and Export
+
+From the Admin Console (Campaigns tab):
+
+- **Backup** — writes a SQLite backup + manifest to `data/campaigns/<id>/backups/`
+- **Export** — downloads a full JSON export of campaign state
+
+From the campaign Settings page (DM):
+
+- Download Export — streams JSON to browser
+- Write Export File — saves to server filesystem
+- Create Backup — SQLite backup on server
+
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env`. Key variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_PORT` | `8790` | Listening port |
+| `DATA_DIR` | `./data` | Campaign data root |
+| `CORS_ORIGINS` | localhost only | Comma-separated allowed origins |
+| `MAX_UPLOAD_BYTES` | 200 MB | Max file upload size |
+| `MAX_CONCURRENT_JOBS` | `3` | Parallel transcription jobs |
+| `LLM_PROVIDER` | `ollama` | `ollama` \| `openai` \| `anthropic` \| `gemini` |
+| `LLM_MODEL` | `qwen2.5:7b` | Model name for the selected provider |
+| `ASR_PROVIDER` | `remote` | `remote` \| `local` \| `whisper-local` \| `groq` \| `openai` |
+| `WHISPER_LOCAL_BASE` | `http://localhost:8000/v1` | Base URL for `whisper-local` provider |
+| `DIARIZATION_MODE` | `auto` | `auto` \| `llm` \| `pyannote` |
+
+See `.env.example` for the full list.
+
+---
+
+## Development Notes
+
+- The frontend is React 19 + Vite 8 + Tailwind CSS 4
+- The API is Express 5 on Node.js (ESM)
+- The app uses SQLite via Node's built-in `node:sqlite` (experimental, Node 22+)
+- `server_legacy.js` contains the main pipeline logic — the modular server imports it and will split it out over time
+- Jobs live in memory — a server restart clears running jobs. Re-run the pipeline if that happens.
