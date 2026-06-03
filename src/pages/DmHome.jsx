@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useApp } from '../AppContext.jsx'
 import { useAuth } from '../AuthContext.jsx'
 import { apiFetch } from '../lib/api.js'
@@ -85,6 +85,12 @@ export default function DmHome() {
               >
                 Switch User
               </button>
+              <Link
+                to="/dm/settings"
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-500 hover:text-slate-100"
+              >
+                Settings
+              </Link>
               <button
                 onClick={() => setShowCreate((s) => !s)}
                 className="rounded-lg border border-amber-700 bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400"

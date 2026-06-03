@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { ensureSqlSchema } from './migrations.js';
 import { dbForCampaignBase, runInTx } from './index.js';
-import { BARD_PROMPT_VERSION } from '../config.js'; // We need this or we must define it
+import { BARD_PROMPT_VERSION } from '../config.js';
 
 export function forUser(user, tableAlias = '') {
   if (!user || user.role === 'dm') return '1=1' // DM bypass

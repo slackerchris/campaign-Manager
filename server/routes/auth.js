@@ -1,216 +1,188 @@
 import express from 'express'
 import crypto from 'node:crypto'
-import path from 'node:path'
-import { dbForCampaignBase, runInTx } from '../db/index.js'
-import { readJson, resolveCampaignBase } from '../utils.js'
-import { loginAdmin } from '../services/adminAuth.js'
+import { db as pgDb } from '../db/postgres/pool.js'
+import * as campaignsRepo from '../db/postgres/repositories/campaigns.repo.js'
+import * as membersRepo from '../db/postgres/repositories/members.repo.js'
+import * as campaignInvitesRepo from '../db/postgres/repositories/campaign-invites.repo.js'
 
 export const authRouter = express.Router({ mergeParams: true })
 
-authRouter.post('/admin-login', async (req, res) => {
-  try {
-    const session = await loginAdmin({
-      username: req.body?.username,
-      password: req.body?.password,
-    })
-    res.json({ ok: true, session })
-  } catch (err) {
-    const status = Number(err?.statusCode) || 500
-    if (status >= 500) console.error(err)
-    res.status(status).json({ ok: false, error: err?.message || 'Admin login failed' })
-  }
-})
+// ── DM: create general invite link ────────────────────────────────────────────
 
 authRouter.post('/invites', async (req, res) => {
-  // TODO: Add proper auth middleware check here once implemented in Phase 2
-  // For now, we will assume req.user is populated by a middleware we'll write next
   try {
     if (!req.user || req.user.role !== 'dm') {
       return res.status(403).json({ ok: false, error: 'Only the campaign DM can create invites' })
     }
-    const { campaignId } = req.params
+    const { campaignId: slug } = req.params
     const { role = 'player' } = req.body
 
-    const { base } = resolveCampaignBase(campaignId)
-    const meta = await readJson(path.join(base, 'meta.json'), null)
-    if (String(meta?.ownerUserId || '') !== String(req.user.id || '')) {
+    const campaign = await campaignsRepo.findCampaignBySlug(slug)
+    if (!campaign) return res.status(404).json({ ok: false, error: 'Campaign not found' })
+    if (campaign.owner_user_id !== req.user.id) {
       return res.status(403).json({ ok: false, error: 'Only the campaign DM can create invites' })
     }
-    const db = dbForCampaignBase(base)
-    const now = Date.now()
-    db.prepare(`
-      INSERT OR IGNORE INTO users (id, display_name, role, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(req.user.id, req.user.displayName || 'DM', 'dm', now, now)
-    db.prepare('UPDATE users SET display_name = ?, role = ?, last_seen_at = ? WHERE id = ?')
-      .run(req.user.displayName || 'DM', 'dm', now, req.user.id)
-    
+
     const token = crypto.randomBytes(16).toString('hex')
-    const expiresAt = now + (1000 * 60 * 60 * 24 * 7) // 7 days default
-    
-    db.prepare(`
-      INSERT INTO invites (token, role, created_by, expires_at)
-      VALUES (?, ?, ?, ?)
-    `).run(token, role, req.user.id, expiresAt)
-    
-    res.json({ ok: true, invite: { token, role, expiresAt } })
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7)
+    const invite = await campaignInvitesRepo.createCampaignInvite({
+      token,
+      campaignId: campaign.id,
+      targetUserId: null,
+      createdByUserId: req.user.id,
+      role,
+      dmDisplayName: req.user.displayName || 'DM',
+      expiresAt,
+    })
+
+    res.json({ ok: true, invite: { token: invite.token, role: invite.role, expiresAt: invite.expires_at.getTime() } })
   } catch (err) {
     console.error(err)
     res.status(500).json({ ok: false, error: 'Internal server error' })
   }
 })
+
+// ── DM: send a directed invite to a specific server user ─────────────────────
 
 authRouter.post('/direct-invite', async (req, res) => {
   try {
     if (!req.user || req.user.role !== 'dm') {
       return res.status(403).json({ ok: false, error: 'Only the campaign DM can send invites' })
     }
-    const { campaignId } = req.params
+    const { campaignId: slug } = req.params
     const { targetServerUserId } = req.body
     if (!targetServerUserId) return res.status(400).json({ ok: false, error: 'targetServerUserId required' })
 
-    const { base } = resolveCampaignBase(campaignId)
-    const meta = await readJson(path.join(base, 'meta.json'), null)
-    if (String(meta?.ownerUserId || '') !== String(req.user.id || '')) {
+    const campaign = await campaignsRepo.findCampaignBySlug(slug)
+    if (!campaign) return res.status(404).json({ ok: false, error: 'Campaign not found' })
+    if (campaign.owner_user_id !== req.user.id) {
       return res.status(403).json({ ok: false, error: 'Only the campaign DM can send invites' })
     }
 
-    const db = dbForCampaignBase(base)
-    const now = Date.now()
-
-    // Check not already a member
-    const existing = db.prepare('SELECT id FROM users WHERE server_user_id = ?').get(targetServerUserId)
+    const existing = await membersRepo.findMember(campaign.id, targetServerUserId)
     if (existing) return res.status(409).json({ ok: false, error: 'User is already in this campaign' })
 
-    // Check no pending directed invite already
-    const pending = db.prepare(
-      'SELECT token FROM invites WHERE target_server_user_id = ? AND consumed_at IS NULL AND expires_at > ?'
-    ).get(targetServerUserId, now)
+    const pending = await campaignInvitesRepo.findPendingDirectedInvite(campaign.id, targetServerUserId)
     if (pending) return res.status(409).json({ ok: false, error: 'A pending invite already exists for this user' })
 
     const token = crypto.randomBytes(16).toString('hex')
-    const expiresAt = now + (1000 * 60 * 60 * 24 * 30)
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30)
+    const invite = await campaignInvitesRepo.createCampaignInvite({
+      token,
+      campaignId: campaign.id,
+      targetUserId: targetServerUserId,
+      createdByUserId: req.user.id,
+      role: 'player',
+      dmDisplayName: req.user.displayName || 'DM',
+      expiresAt,
+    })
 
-    db.prepare(`
-      INSERT OR IGNORE INTO users (id, display_name, role, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(req.user.id, req.user.displayName || 'DM', 'dm', now, now)
-
-    db.prepare(`
-      INSERT INTO invites (token, role, created_by, expires_at, target_server_user_id, dm_display_name)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(token, 'player', req.user.id, expiresAt, targetServerUserId, req.user.displayName || 'DM')
-
-    res.json({ ok: true, invite: { token, expiresAt } })
+    res.json({ ok: true, invite: { token: invite.token, expiresAt: invite.expires_at.getTime() } })
   } catch (err) {
     console.error(err)
     res.status(500).json({ ok: false, error: 'Internal server error' })
   }
 })
+
+// ── Player: accept a directed invite (requires server account) ────────────────
 
 authRouter.post('/accept-direct-invite', async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ ok: false, error: 'Sign in required' })
 
-    const { campaignId } = req.params
+    const { campaignId: slug } = req.params
     const { inviteToken, displayName } = req.body
     if (!inviteToken) return res.status(400).json({ ok: false, error: 'inviteToken required' })
 
-    const { base } = resolveCampaignBase(campaignId)
-    const db = dbForCampaignBase(base)
-    const now = Date.now()
+    const campaign = await campaignsRepo.findCampaignBySlug(slug)
+    if (!campaign) return res.status(404).json({ ok: false, error: 'Campaign not found' })
 
-    let sessionToken = null, userId = null, role = null, expiresAt = null
+    await pgDb.transaction().execute(async (trx) => {
+      const invite = await trx
+        .selectFrom('campaign_invites')
+        .selectAll()
+        .where('token', '=', inviteToken)
+        .forUpdate()
+        .executeTakeFirst()
 
-    runInTx(db, () => {
-      const invite = db.prepare('SELECT * FROM invites WHERE token = ?').get(inviteToken)
-      if (!invite) throw new Error('INVITE_INVALID')
-      if (invite.consumed_at) throw new Error('INVITE_CONSUMED')
-      if (invite.expires_at < now) throw new Error('INVITE_EXPIRED')
-      if (invite.target_server_user_id && invite.target_server_user_id !== req.user.id) {
-        throw new Error('INVITE_NOT_FOR_YOU')
+      if (!invite) throw Object.assign(new Error('INVITE_INVALID'), { statusCode: 400 })
+      if (invite.consumed_at) throw Object.assign(new Error('INVITE_CONSUMED'), { statusCode: 400 })
+      if (invite.expires_at < new Date()) throw Object.assign(new Error('INVITE_EXPIRED'), { statusCode: 400 })
+      if (invite.target_user_id && invite.target_user_id !== req.user.id) {
+        throw Object.assign(new Error('INVITE_NOT_FOR_YOU'), { statusCode: 403 })
       }
 
-      userId = crypto.randomUUID()
-      role = invite.role
       const finalDisplayName = String(displayName || req.user.displayName || '').trim() || 'Player'
 
-      db.prepare(`
-        INSERT INTO users (id, display_name, role, created_at, last_seen_at, server_user_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(userId, finalDisplayName, role, now, now, req.user.id)
+      await trx
+        .insertInto('campaign_members')
+        .values({ campaign_id: campaign.id, user_id: req.user.id, display_name: finalDisplayName, role: invite.role, joined_at: new Date() })
+        .onConflict((oc) => oc.columns(['campaign_id', 'user_id']).doNothing())
+        .execute()
 
-      db.prepare('UPDATE invites SET consumed_at = ?, consumed_by_user_id = ? WHERE token = ?').run(now, userId, inviteToken)
-
-      sessionToken = crypto.randomBytes(32).toString('hex')
-      expiresAt = now + (1000 * 60 * 60 * 24 * 30)
-      db.prepare('INSERT INTO sessions_auth (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(sessionToken, userId, now, expiresAt)
+      await trx
+        .updateTable('campaign_invites')
+        .set({ consumed_at: new Date(), consumed_by_user_id: req.user.id })
+        .where('token', '=', inviteToken)
+        .execute()
     })
 
-    res.json({ ok: true, session: { token: sessionToken, userId, role, expiresAt } })
+    res.json({ ok: true, campaignId: slug })
   } catch (err) {
-    if (err.message === 'INVITE_INVALID') return res.status(400).json({ ok: false, error: 'Invalid invite' })
-    if (err.message === 'INVITE_CONSUMED') return res.status(400).json({ ok: false, error: 'Invite already used' })
-    if (err.message === 'INVITE_EXPIRED') return res.status(400).json({ ok: false, error: 'Invite expired' })
-    if (err.message === 'INVITE_NOT_FOR_YOU') return res.status(403).json({ ok: false, error: 'This invite is for a different user' })
+    const messages = { INVITE_INVALID: 'Invalid invite', INVITE_CONSUMED: 'Invite already used', INVITE_EXPIRED: 'Invite expired', INVITE_NOT_FOR_YOU: 'This invite is for a different user' }
+    const msg = messages[err.message]
+    if (msg) return res.status(err.statusCode || 400).json({ ok: false, error: msg })
     console.error(err)
     res.status(500).json({ ok: false, error: 'Internal server error' })
   }
 })
 
+// ── Player: join with a general invite token (requires server account) ─────────
+
 authRouter.post('/join', async (req, res) => {
   try {
-    const { campaignId } = req.params
+    if (!req.user) return res.status(401).json({ ok: false, error: 'Sign in required to join a campaign' })
+
+    const { campaignId: slug } = req.params
     const { inviteToken, displayName } = req.body
+    if (!inviteToken) return res.status(400).json({ ok: false, error: 'inviteToken required' })
 
-    if (!inviteToken || !displayName?.trim()) {
-      return res.status(400).json({ ok: false, error: 'Invite token and display name are required' })
-    }
+    const campaign = await campaignsRepo.findCampaignBySlug(slug)
+    if (!campaign) return res.status(404).json({ ok: false, error: 'Campaign not found' })
 
-    const { base } = resolveCampaignBase(campaignId)
-    const db = dbForCampaignBase(base)
-    const now = Date.now()
+    await pgDb.transaction().execute(async (trx) => {
+      const invite = await trx
+        .selectFrom('campaign_invites')
+        .selectAll()
+        .where('token', '=', inviteToken)
+        .where('campaign_id', '=', campaign.id)
+        .forUpdate()
+        .executeTakeFirst()
 
-    let sessionToken = null;
-    let userId = null;
-    let role = null;
-    let expiresAt = null;
+      if (!invite) throw Object.assign(new Error('INVITE_INVALID'), { statusCode: 400 })
+      if (invite.consumed_at) throw Object.assign(new Error('INVITE_CONSUMED'), { statusCode: 400 })
+      if (invite.expires_at < new Date()) throw Object.assign(new Error('INVITE_EXPIRED'), { statusCode: 400 })
 
-    runInTx(db, () => {
-      // 1. Verify invite
-      const invite = db.prepare('SELECT token, role, expires_at, consumed_at FROM invites WHERE token = ?').get(inviteToken)
-      if (!invite) throw new Error('INVITE_INVALID')
-      if (invite.consumed_at) throw new Error('INVITE_CONSUMED')
-      if (invite.expires_at < now) throw new Error('INVITE_EXPIRED')
+      const finalDisplayName = String(displayName || req.user.displayName || '').trim() || 'Player'
 
-      // 2. Create User
-      userId = crypto.randomUUID()
-      role = invite.role
-      db.prepare(`
-        INSERT INTO users (id, display_name, role, created_at, last_seen_at, server_user_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(userId, displayName.trim(), role, now, now, req.user?.id || null)
+      await trx
+        .insertInto('campaign_members')
+        .values({ campaign_id: campaign.id, user_id: req.user.id, display_name: finalDisplayName, role: invite.role, joined_at: new Date() })
+        .onConflict((oc) => oc.columns(['campaign_id', 'user_id']).doNothing())
+        .execute()
 
-      // 3. Consume invite
-      db.prepare(`
-        UPDATE invites SET consumed_at = ?, consumed_by_user_id = ? WHERE token = ?
-      `).run(now, userId, inviteToken)
-
-      // 4. Issue session token (30 days)
-      sessionToken = crypto.randomBytes(32).toString('hex')
-      expiresAt = now + (1000 * 60 * 60 * 24 * 30)
-      db.prepare(`
-        INSERT INTO sessions_auth (token, user_id, created_at, expires_at)
-        VALUES (?, ?, ?, ?)
-      `).run(sessionToken, userId, now, expiresAt)
+      await trx
+        .updateTable('campaign_invites')
+        .set({ consumed_at: new Date(), consumed_by_user_id: req.user.id })
+        .where('token', '=', inviteToken)
+        .execute()
     })
 
-    res.json({ ok: true, session: { token: sessionToken, userId, role, expiresAt } })
+    res.json({ ok: true, campaignId: slug })
   } catch (err) {
-    if (err.message === 'INVITE_INVALID') return res.status(400).json({ ok: false, error: 'Invalid invite' })
-    if (err.message === 'INVITE_CONSUMED') return res.status(400).json({ ok: false, error: 'Invite already consumed' })
-    if (err.message === 'INVITE_EXPIRED') return res.status(400).json({ ok: false, error: 'Invite expired' })
-    
+    const messages = { INVITE_INVALID: 'Invalid invite', INVITE_CONSUMED: 'Invite already consumed', INVITE_EXPIRED: 'Invite expired' }
+    const msg = messages[err.message]
+    if (msg) return res.status(err.statusCode || 400).json({ ok: false, error: msg })
     console.error(err)
     res.status(500).json({ ok: false, error: 'Internal server error' })
   }

@@ -103,6 +103,11 @@ export function withCampaignBodyWriteLock(handler) {
   }
 }
 
+export function sourceHashForText(text) {
+  if (!text) return ''
+  return crypto.createHash('sha256').update(String(text)).digest('hex').slice(0, 16)
+}
+
 export async function readJson(file, fallback) {
   try {
     return JSON.parse(await fs.readFile(file, 'utf8'))

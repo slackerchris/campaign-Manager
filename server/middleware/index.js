@@ -8,4 +8,5 @@ const _corsOrigins = process.env.CORS_ORIGINS
 
 export const corsMiddleware = cors({ origin: _corsOrigins, credentials: true });
 
-export { authMiddleware } from './auth.js';
+export { authMiddleware } from './auth.js'
+export { rateLimit } from './rateLimit.js';

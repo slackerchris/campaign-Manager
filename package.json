@@ -7,7 +7,11 @@
     "dev": "vite",
     "api": "DATA_DIR=./data DIARIZATION_MODE=pyannote node server.mjs",
     "start": "node server.mjs",
-    "admin:reset": "node scripts/reset-admin-password.mjs",
+    "db:migrate": "node --env-file=.env scripts/db-migrate.mjs up",
+    "db:status": "node --env-file=.env scripts/db-migrate.mjs status",
+    "auth:migrate": "node --env-file=.env scripts/migrate-auth-to-postgres.mjs",
+    "campaigns:migrate": "node --env-file=.env scripts/migrate-campaigns-to-postgres.mjs",
+    "admin:reset": "node --env-file=.env scripts/reset-admin-password.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -16,10 +20,13 @@
     "cors": "^2.8.6",
     "dnd-data": "^1.0.0",
     "express": "^5.2.1",
+    "kysely": "^0.29.2",
     "multer": "^2.1.1",
+    "pg": "^8.21.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.13.1"
+    "react-router-dom": "^7.13.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

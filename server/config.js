@@ -1,6 +1,15 @@
 import path from 'node:path'
 import os from 'node:os'
 
+// ── PostgreSQL ───────────────────────────────────────────────────────────────
+export const DATABASE_URL = process.env.DATABASE_URL || ''
+
+// ── Encryption (AES-256-GCM) — 64-char hex: openssl rand -hex 32
+export const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || ''
+
+// ── Artifact storage ─────────────────────────────────────────────────────────
+export const ARTIFACT_DIR = path.resolve(process.env.ARTIFACT_DIR || './data/artifacts')
+
 export function envNumber(value, fallback, minimum = 0) {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return fallback
@@ -13,11 +22,20 @@ export const SSH_USER = process.env.OLLAMA_SSH_USER || 'root'
 export const SSH_HOST = process.env.OLLAMA_SSH_HOST || '10.0.50.5'
 export const REMOTE_AUDIO_DIR = process.env.REMOTE_AUDIO_DIR || '/tmp/dnd-audio-in'
 export const REMOTE_OUT_DIR = process.env.REMOTE_OUT_DIR || '/tmp/dnd-audio-out'
-export const WHISPER_LOCAL_BASE = process.env.WHISPER_LOCAL_BASE || 'http://ollama.middl.earth.arda:8765'
-export const WHISPER_LOCAL_PATH = process.env.WHISPER_LOCAL_PATH || '/transcribe'
-export const WHISPER_LOCAL_MODEL = process.env.WHISPER_LOCAL_MODEL || 'large-v3'
-export const WHISPER_LOCAL_API_KEY = process.env.WHISPER_LOCAL_API_KEY || ''
-export const WHISPER_LOCAL_API_KEY_HEADER = process.env.WHISPER_LOCAL_API_KEY_HEADER || 'X-API-Key'
+export let WHISPER_LOCAL_BASE = process.env.WHISPER_LOCAL_BASE || 'http://ollama.middl.earth.arda:8765'
+export function setWhisperLocalBase(val) { WHISPER_LOCAL_BASE = val }
+
+export let WHISPER_LOCAL_PATH = process.env.WHISPER_LOCAL_PATH || '/transcribe'
+export function setWhisperLocalPath(val) { WHISPER_LOCAL_PATH = val }
+
+export let WHISPER_LOCAL_MODEL = process.env.WHISPER_LOCAL_MODEL || 'large-v3'
+export function setWhisperLocalModel(val) { WHISPER_LOCAL_MODEL = val }
+
+export let WHISPER_LOCAL_API_KEY = process.env.WHISPER_LOCAL_API_KEY || ''
+export function setWhisperLocalApiKey(val) { WHISPER_LOCAL_API_KEY = val }
+
+export let WHISPER_LOCAL_API_KEY_HEADER = process.env.WHISPER_LOCAL_API_KEY_HEADER || 'X-API-Key'
+export function setWhisperLocalApiKeyHeader(val) { WHISPER_LOCAL_API_KEY_HEADER = val }
 
 export const WHISPER_MODEL = process.env.WHISPER_MODEL || 'tiny'
 export const WHISPER_DEVICE = process.env.WHISPER_DEVICE || 'cuda'
@@ -99,6 +117,8 @@ export const ASR_CONFIG_FILE = path.join(SECRETS_DIR, 'asr-config.json')
 export const ADMIN_AUTH_FILE = path.join(SECRETS_DIR, 'admin-auth.json')
 
 export const CAMPAIGN_DB_CACHE_MAX = envNumber(process.env.CAMPAIGN_DB_CACHE_MAX, 10, 1)
+
+export const BARD_PROMPT_VERSION = 'bard-v1'
 
 export const CORS_ORIGINS = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)

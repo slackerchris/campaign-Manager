@@ -7,8 +7,8 @@ export default function AdminSetup() {
   const [displayName, setDisplayName] = useState('Admin')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [status, setStatus] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   const [checkingSetup, setCheckingSetup] = useState(true)
   const navigate = useNavigate()
   const passwordReady = password.length >= 8
@@ -35,42 +35,36 @@ export default function AdminSetup() {
 
   async function handleSetup(e) {
     e.preventDefault()
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters long.')
-      return
-    }
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.')
-      return
-    }
+    if (!username.trim()) { setError('Username is required'); return }
+    if (password.length < 8) { setError('Password must be at least 8 characters'); return }
+    if (password !== confirmPassword) { setError('Passwords do not match'); return }
 
-    setStatus('Creating admin account...')
+    setLoading(true)
     setError('')
     try {
       const res = await apiFetch('/api/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, displayName, password })
+        body: JSON.stringify({ username: username.trim(), displayName: displayName.trim(), password }),
       })
       const data = await res.json()
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Server already claimed.')
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Setup failed')
 
       const loginRes = await apiFetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username: username.trim(), password }),
       })
       const loginData = await loginRes.json()
-      if (!loginRes.ok || !loginData.ok) throw new Error(loginData.error || 'Admin account created. Sign in to continue.')
+      if (!loginRes.ok || !loginData.ok) throw new Error('Account created — please sign in')
 
       localStorage.setItem('dnd_token', loginData.session.token)
       localStorage.setItem('dnd_token_role', loginData.session.role || 'admin')
-      localStorage.setItem('dnd_token_user', loginData.session.userId || 'server-admin')
-      setStatus('Admin account created.')
-      setTimeout(() => navigate('/admin'), 500)
+      localStorage.setItem('dnd_token_user', loginData.session.userId || '')
+      navigate('/admin')
     } catch (err) {
       setError(err.message)
-      setStatus('')
+      setLoading(false)
     }
   }
 
@@ -104,7 +98,6 @@ export default function AdminSetup() {
 
         <div className="p-5">
           {error && <div className="mb-4 rounded-md border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-300">{error}</div>}
-          {status && <div className="mb-4 rounded-md border border-emerald-800 bg-emerald-950/40 p-3 text-sm text-emerald-300">{status}</div>}
 
         <form onSubmit={handleSetup} className="space-y-3">
           <label className="block text-[11px] font-semibold uppercase text-slate-500">Username</label>
@@ -145,8 +138,8 @@ export default function AdminSetup() {
               {passwordsMatch ? 'Passwords match.' : 'Passwords do not match yet.'}
             </div>
           )}
-          <button className="w-full rounded-md border border-amber-700 bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-amber-400">
-            Create Admin Account
+          <button className="w-full rounded-md border border-amber-700 bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed" disabled={loading}>
+            {loading ? 'Creating account…' : 'Create Admin Account'}
           </button>
           <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
             <Link to="/" className="hover:text-amber-300">Back</Link>

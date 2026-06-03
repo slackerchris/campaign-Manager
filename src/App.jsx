@@ -13,6 +13,7 @@ import AdminSetup from './pages/AdminSetup.jsx'
 import AdminLogin from './pages/AdminLogin.jsx'
 import AdminPage from './pages/AdminPage.jsx'
 import DmHome from './pages/DmHome.jsx'
+import DmSettings from './pages/DmSettings.jsx'
 import PlayerHome from './pages/PlayerHome.jsx'
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/setup" element={<AdminSetup />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/dm" element={<DmHome />} />
+          <Route path="/dm/settings" element={<DmSettings />} />
           <Route path="/player" element={<PlayerHome />} />
           <Route path="/campaigns/:id/login" element={<Login />} />
           <Route path="/campaigns/:id" element={<CampaignLayout />}>

@@ -6,7 +6,6 @@ const API_BASE = '/api'
 
 export default function SettingsPage() {
   const {
-    activeCampaign,
     llmProvider, setLlmProvider, llmModel, setLlmModel,
     pipelineHasKey, setPipelineHasKey,
     anthropicHasKey, setAnthropicHasKey,
@@ -55,13 +54,6 @@ export default function SettingsPage() {
     } catch { /* ignore */ }
     setHealthLoading(false)
   }
-
-  // ── SQLite state ──────────────────────────────────────────────────────────
-  const [sqlStorageStatus, setSqlStorageStatus] = useState('')
-  const [sqlStorageReport, setSqlStorageReport] = useState(null)
-  const [sqlOpsStatus, setSqlOpsStatus] = useState('')
-  const [sqlExportInfo, setSqlExportInfo] = useState(null)
-  const [sqlBackupInfo, setSqlBackupInfo] = useState(null)
 
   useEffect(() => {
     loadLlmModels()
@@ -204,67 +196,6 @@ export default function SettingsPage() {
     setPyannoteToken('')
     setPyannoteHasToken(true)
     setPyannoteTokenStatus('Saved. Pyannote token is persisted on server.')
-  }
-
-  async function runSqlStorageCheck() {
-    if (!activeCampaign?.id) { setSqlStorageStatus('Select a campaign first'); return }
-    setSqlStorageStatus('Loading SQLite diagnostics...')
-    const r = await apiFetch(`${API_BASE}/campaigns/${activeCampaign.id}/sql-parity`)
-    const j = await r.json()
-    if (!r.ok || !j.ok) { setSqlStorageStatus(`Failed: ${j.error || 'unknown error'}`); return }
-    setSqlStorageReport(j.parity || null)
-    setSqlStorageStatus('SQLite diagnostics loaded')
-  }
-
-  async function downloadCampaignExport() {
-    if (!activeCampaign?.id) { setSqlOpsStatus('Select a campaign first'); return }
-    setSqlOpsStatus('Building export...')
-    const r = await apiFetch(`${API_BASE}/campaigns/${activeCampaign.id}/export`)
-    const j = await r.json()
-    if (!r.ok || !j.ok) { setSqlOpsStatus(`Export failed: ${j.error || 'unknown error'}`); return }
-
-    const payload = j.export || {}
-    const stamp = new Date(payload.exportedAt || Date.now()).toISOString().replace(/[:.]/g, '-')
-    const fileName = `${stamp}-${activeCampaign.id}-export.json`
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fileName
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
-
-    setSqlExportInfo({ fileName, exportedAt: payload.exportedAt || Date.now(), bytes: blob.size, mode: 'download' })
-    setSqlOpsStatus('Export downloaded')
-  }
-
-  async function writeCampaignExportFile() {
-    if (!activeCampaign?.id) { setSqlOpsStatus('Select a campaign first'); return }
-    setSqlOpsStatus('Writing export file...')
-    const r = await apiFetch(`${API_BASE}/campaigns/${activeCampaign.id}/export`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ includeArtifactIndex: true }),
-    })
-    const j = await r.json()
-    if (!r.ok || !j.ok) { setSqlOpsStatus(`Export file failed: ${j.error || 'unknown error'}`); return }
-    setSqlExportInfo({ ...(j.exportFile || null), mode: 'server-file' })
-    setSqlOpsStatus('Export file written to server')
-  }
-
-  async function createCampaignBackup() {
-    if (!activeCampaign?.id) { setSqlOpsStatus('Select a campaign first'); return }
-    setSqlOpsStatus('Creating SQLite backup...')
-    const r = await apiFetch(`${API_BASE}/campaigns/${activeCampaign.id}/backup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    const j = await r.json()
-    if (!r.ok || !j.ok) { setSqlOpsStatus(`Backup failed: ${j.error || 'unknown error'}`); return }
-    setSqlBackupInfo(j.backup || null)
-    setSqlOpsStatus('SQLite backup created')
   }
 
   return (
@@ -528,56 +459,6 @@ export default function SettingsPage() {
         {pyannoteTokenStatus && <div className="mt-2 text-xs text-amber-300">{pyannoteTokenStatus}</div>}
       </div>
 
-      {/* SQLite Diagnostics */}
-      <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h2 className="text-xl font-semibold">SQLite Diagnostics</h2>
-          <div className="flex flex-wrap justify-end gap-2">
-            <button onClick={runSqlStorageCheck} className="rounded-xl border border-sky-700 text-sky-300 px-4 py-2 text-sm">Run Check</button>
-            <button onClick={downloadCampaignExport} className="rounded-xl border border-emerald-700 text-emerald-300 px-4 py-2 text-sm">Download Export</button>
-            <button onClick={writeCampaignExportFile} className="rounded-xl border border-cyan-700 text-cyan-300 px-4 py-2 text-sm">Write Export File</button>
-            <button onClick={createCampaignBackup} className="rounded-xl border border-amber-700 text-amber-300 px-4 py-2 text-sm">Create Backup</button>
-          </div>
-        </div>
-        <div className="mt-1 text-xs text-slate-400">Shows current SQLite-backed counts and hashes for canonical state, trackers, journal, and bard tales.</div>
-        {sqlStorageStatus && <div className="mt-2 text-xs text-amber-300">{sqlStorageStatus}</div>}
-        {sqlOpsStatus && <div className="mt-2 text-xs text-emerald-300">{sqlOpsStatus}</div>}
-        {(sqlExportInfo || sqlBackupInfo) && (
-          <div className="mt-3 rounded-xl border border-slate-700 bg-slate-950/60 p-3 text-xs space-y-2">
-            {sqlExportInfo && (
-              <>
-                <div className="text-slate-200">Last export: {sqlExportInfo.fileName || 'unknown file'}</div>
-                <div className="text-slate-400">Mode: {sqlExportInfo.mode === 'server-file' ? 'server file' : 'download'}</div>
-                {sqlExportInfo.bytes != null && <div className="text-slate-400">Size: {sqlExportInfo.bytes} bytes</div>}
-              </>
-            )}
-            {sqlBackupInfo && (
-              <>
-                <div className="text-slate-200">Last backup: {sqlBackupInfo.fileName || 'unknown file'}</div>
-                {sqlBackupInfo.manifestFileName && <div className="text-slate-400">Manifest: {sqlBackupInfo.manifestFileName}</div>}
-                {sqlBackupInfo.bytes != null && <div className="text-slate-400">Size: {sqlBackupInfo.bytes} bytes</div>}
-              </>
-            )}
-          </div>
-        )}
-        {sqlStorageReport && (
-          <div className="mt-3 rounded-xl border border-slate-700 bg-slate-950/60 p-3 text-xs space-y-2">
-            <div className={sqlStorageReport.ok ? 'text-emerald-300' : 'text-rose-300'}>Storage mode: {sqlStorageReport.mode || 'unknown'}</div>
-            <div>Canonical entities: {sqlStorageReport.canonical?.entityCount ?? 0}</div>
-            <div>Canonical aliases: {sqlStorageReport.canonical?.aliasCount ?? 0}</div>
-            <div>Canonical tracker rows: {sqlStorageReport.canonical?.trackerCount ?? 0}</div>
-            <div>Trackers quest: {sqlStorageReport.trackers?.quest?.count ?? 0}</div>
-            <div>Trackers npc: {sqlStorageReport.trackers?.npc?.count ?? 0}</div>
-            <div>Trackers place: {sqlStorageReport.trackers?.place?.count ?? 0}</div>
-            <div>Journal: {sqlStorageReport.journal?.count ?? 0}</div>
-            <div>Bard tales: {sqlStorageReport.bardTales?.count ?? 0}</div>
-            <details>
-              <summary className="cursor-pointer text-slate-300">Show SQLite hashes</summary>
-              <pre className="mt-2 whitespace-pre-wrap text-[11px] text-slate-400">{JSON.stringify(sqlStorageReport, null, 2)}</pre>
-            </details>
-          </div>
-        )}
-      </div>
     </div>
   )
 }
